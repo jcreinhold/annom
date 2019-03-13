@@ -14,13 +14,19 @@ import unittest
 
 import torch
 
-from annom.loss import LRSDecompLoss, OrdLoss
+from annom.loss import HotLoss, LRSDecompLoss, OrdLoss
 
 
 class TestLoss(unittest.TestCase):
 
     def setUp(self):
         pass
+
+    def test_hot(self):
+        hl = HotLoss()
+        x, y = (torch.zeros((2,1,2,2,2)), torch.zeros((2,1,2,2,2))), torch.zeros((2,1,2,2,2))
+        loss = hl(x, y)
+        self.assertEqual(loss.item(), 0)
 
     def test_lrsd(self):
         lrsd = LRSDecompLoss()

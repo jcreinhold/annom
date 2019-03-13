@@ -11,7 +11,8 @@ Author: Jacob Reinhold (jacob.reinhold@jhu.edu)
 Created on: Mar 11, 2018
 """
 
-__all__ = ['LRSDecompLoss',
+__all__ = ['HotLoss',
+           'LRSDecompLoss',
            'OrdLoss']
 
 from typing import Tuple
@@ -82,3 +83,10 @@ class OrdLoss(nn.Module):
         y_hat = self.predict(yd_hat)
         MAE = self.mae(y_hat, y)
         return self.ce_weight * CE + self.mae_weight * MAE
+
+
+class HotLoss(nn.Module):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        yhat, s = out
+        loss = torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + s))
+        return loss
