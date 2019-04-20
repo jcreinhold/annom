@@ -126,7 +126,8 @@ class HotNet(Unet):
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         f = self._conv(in_c, out_c, 1, bias=bias)
-        s = self._conv(in_c, out_c, 1, bias=bias)
+        s = nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                          self._conv(in_c, out_c, 1, bias=False))
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
