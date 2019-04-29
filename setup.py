@@ -31,5 +31,6 @@ args = dict(
 )
 
 setup(install_requires=['numpy>=1.15.4',
+                        'scipy',
                         'torch>=1.0.0',
                         'torchvision>=0.2.1'], **args)

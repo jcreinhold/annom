@@ -18,6 +18,7 @@ import logging
 from typing import Optional, Tuple
 
 import numpy as np
+from scipy.ndimage import sobel
 import torch
 from torch import nn
 
@@ -104,9 +105,10 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), **kwargs):
+    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, **kwargs):
         self.n_samp = n_samp
         self.mlv = min_logvar
+        self.edge = edge
         super().__init__(n_layers, enable_dropout=True, **kwargs)
         self.criterion = HotLoss()
 
@@ -115,18 +117,32 @@ class HotNet(Unet):
         return x
 
     def _fwd_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
+        if self.edge: edge = self._edge(x)
         x = self._fwd_skip_nf(x)
+        if self.edge: x = torch.cat((x, edge), dim=1)
         x = (self.finish[0](x), torch.clamp(self.finish[1](x),min=self.mlv))
         return x
 
     def _fwd_no_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
+        if self.edge: edge = self._edge(x)
         x = self._fwd_no_skip_nf(x)
+        if self.edge: x = torch.cat((x, edge), dim=1)
         x = (self.finish[0](x), torch.clamp(self.finish[1](x),min=self.mlv))
         return x
 
+    def _edge(self, x):
+        xn = x.cpu().detach().numpy()
+        em = torch.cat([torch.from_numpy(sobel(xn, axis=i)) for i in range(-2,0)], dim=1).to(x.device)  # only 2d
+        return em
+
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
-        f = self._conv(in_c, out_c, 1, bias=bias)
+        if self.edge: in_c = in_c + 2
+        f = self._conv(in_c, out_c, 1, bias=bias) if self.edge else \
+            nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                          self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                          self._conv(in_c, out_c, 1, bias=bias))
         s = nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                          self._conv_act(in_c, in_c, 3, self.act, self.norm),
                           self._conv(in_c, out_c, 1, bias=False))
         return nn.ModuleList([f, s])
 
