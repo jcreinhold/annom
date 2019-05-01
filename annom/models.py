@@ -119,16 +119,24 @@ class HotNet(Unet):
     def _fwd_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
         if self.edge: edge = self._edge(x)
         x = self._fwd_skip_nf(x)
-        if self.edge: x = torch.cat((x, edge), dim=1)
-        x = (self.finish[0](x), torch.clamp(self.finish[1](x),min=self.mlv))
-        return x
+        if self.edge:
+            x = torch.cat((x, edge), dim=1)
+            xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
+        else:
+            xh = self.finish[0](x)
+        s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
+        return xh, s
 
     def _fwd_no_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
         if self.edge: edge = self._edge(x)
         x = self._fwd_no_skip_nf(x)
-        if self.edge: x = torch.cat((x, edge), dim=1)
-        x = (self.finish[0](x), torch.clamp(self.finish[1](x),min=self.mlv))
-        return x
+        if self.edge:
+            x = torch.cat((x, edge), dim=1)
+            xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
+        else:
+            xh = self.finish[0](x)
+        s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
+        return xh, s
 
     def _edge(self, x):
         xn = x.cpu().detach().numpy()
@@ -137,13 +145,13 @@ class HotNet(Unet):
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         if self.edge: in_c = in_c + 2
-        f = self._conv(in_c, out_c, 1, bias=bias) if self.edge else \
-            nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                          self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                          self._conv(in_c, out_c, 1, bias=bias))
-        s = nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                          self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                          self._conv(in_c, out_c, 1, bias=False))
+        f = self._conv(in_c, out_c, 1, bias=bias) if not self.edge else \
+            nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                                         self._conv(in_c, out_c, 1, bias=bias))])
+        s = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                                         self._conv(in_c, out_c, 1, bias=False))])
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
