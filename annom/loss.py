@@ -12,6 +12,7 @@ Created on: Mar 11, 2018
 """
 
 __all__ = ['HotLoss',
+           'HotLaplacianLoss',
            'LRSDecompLoss',
            'OrdLoss']
 
@@ -89,4 +90,11 @@ class HotLoss(nn.Module):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, s = out
         loss = torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + s))
+        return loss
+
+
+class HotLaplacianLoss(nn.Module):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        yhat, s = out
+        loss = torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + s)
         return loss

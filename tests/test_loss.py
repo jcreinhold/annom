@@ -14,7 +14,7 @@ import unittest
 
 import torch
 
-from annom.loss import HotLoss, LRSDecompLoss, OrdLoss
+from annom.loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
 
 
 class TestLoss(unittest.TestCase):
@@ -24,6 +24,12 @@ class TestLoss(unittest.TestCase):
 
     def test_hot(self):
         hl = HotLoss()
+        x, y = (torch.zeros((2,1,2,2,2)), torch.zeros((2,1,2,2,2))), torch.zeros((2,1,2,2,2))
+        loss = hl(x, y)
+        self.assertEqual(loss.item(), 0)
+
+    def test_hot_lap(self):
+        hl = HotLaplacianLoss()
         x, y = (torch.zeros((2,1,2,2,2)), torch.zeros((2,1,2,2,2))), torch.zeros((2,1,2,2,2))
         loss = hl(x, y)
         self.assertEqual(loss.item(), 0)

@@ -23,7 +23,7 @@ import torch
 from torch import nn
 
 from synthnn import Unet
-from .loss import HotLoss, LRSDecompLoss, OrdLoss
+from .loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +105,13 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, **kwargs):
+    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True, **kwargs):
         self.n_samp = n_samp
         self.mlv = min_logvar
         self.edge = edge
+        self.laplacian = laplacian
         super().__init__(n_layers, enable_dropout=True, **kwargs)
-        self.criterion = HotLoss()
+        self.criterion = HotLoss() if not laplacian else HotLaplacianLoss()
 
     def forward(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
         x = self._fwd_skip(x, **kwargs) if not self.no_skip else self._fwd_no_skip(x, **kwargs)
@@ -155,7 +156,10 @@ class HotNet(Unet):
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
-        return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2 + torch.mean(torch.exp(s),dim=0)
+        v1 = torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
+        v2 = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
+        samp_var = v1 + v2
+        return samp_var
 
     def predict(self, x:torch.Tensor, return_temp:bool=False, **kwargs) -> torch.Tensor:
         out = [self.forward(x) for _ in range(self.n_samp)]
