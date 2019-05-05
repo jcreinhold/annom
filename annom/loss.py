@@ -53,13 +53,12 @@ class LRSDecompLoss(nn.Module):
 
 
 class OrdLoss(nn.Module):
-    def __init__(self, params:Tuple[int,int,int], device:torch.device, is_3d:bool=False, lmbda:Tuple[float,float]=(1,1)):
+    def __init__(self, params:Tuple[int,int,int], is_3d:bool=False, lmbda:Tuple[float,float]=(1,1)):
         super(OrdLoss, self).__init__()
         start, stop, n_bins = params
         self.ce_weight, self.mae_weight = lmbda
-        self.device = device
         self.bins = np.linspace(start, stop, n_bins-1, endpoint=False)
-        self.tbins = self._linspace(start, stop, n_bins, is_3d).to(self.device)
+        self.tbins = self._linspace(start, stop, n_bins, is_3d)
         self.mae = nn.L1Loss()
         self.ce = nn.CrossEntropyLoss()
 
@@ -70,11 +69,11 @@ class OrdLoss(nn.Module):
         return trng if not is_3d else trng[...,None]
 
     def _digitize(self, x:torch.Tensor) -> torch.Tensor:
-        return torch.from_numpy(np.digitize(x.cpu().detach().numpy(), self.bins)).squeeze().to(self.device)
+        return torch.from_numpy(np.digitize(x.cpu().detach().numpy(), self.bins)).squeeze().to(x.device)
 
     def predict(self, yd_hat:torch.Tensor) -> torch.Tensor:
         p = F.softmax(yd_hat, dim=1)
-        intensity_bins = torch.ones_like(yd_hat) * self.tbins
+        intensity_bins = torch.ones_like(yd_hat) * self.tbins.to(yd_hat.device)
         y_hat = torch.sum(p * intensity_bins, dim=1, keepdim=True)
         return y_hat
 

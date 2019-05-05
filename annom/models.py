@@ -36,12 +36,11 @@ class OrdNet(Unet):
         ord_params (Tuple[int,int,int]): parameters for ordinal regression (start,end,n_bins) [Default=None]
         device (torch.device): device to place new parameters/tensors on [Default=None]
     """
-    def __init__(self, n_layers:int, ord_params:Tuple[int,int,int]=None, device:torch.device=None, **kwargs):
+    def __init__(self, n_layers:int, ord_params:Tuple[int,int,int]=None, **kwargs):
         # setup and store instance parameters
         self.ord_params = ord_params
-        self.device = device
         super().__init__(n_layers, **kwargs)
-        self.criterion = OrdLoss(ord_params, device, self.is_3d)
+        self.criterion = OrdLoss(ord_params, self.is_3d)
 
     def forward(self, x:torch.Tensor, return_temp:bool=False) -> torch.Tensor:
         x = self._fwd_skip(x, return_temp) if not self.no_skip else self._fwd_no_skip(x, return_temp)
