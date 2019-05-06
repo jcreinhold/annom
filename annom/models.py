@@ -22,7 +22,7 @@ from scipy.ndimage import sobel
 import torch
 from torch import nn
 
-from synthnn import Unet
+from synthtorch import Unet
 from .loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
 
 logger = logging.getLogger(__name__)
