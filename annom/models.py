@@ -48,19 +48,26 @@ class OrdNet(Unet):
 
     def _fwd_skip(self, x:torch.Tensor, return_temp:bool=False) -> torch.Tensor:
         x = self._fwd_skip_nf(x)
-        x = (self.finish[0](x) / torch.clamp(self.finish[1](x), min=1e-6)) if not return_temp else self.finish[1](x)
-        return x
+        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
+        t  = self.finish[1][1](self._add_noise(self.finish[1][0](x)))
+        return xh / torch.clamp(t, min=1e-6) if not return_temp else t
 
     def _fwd_no_skip(self, x:torch.Tensor, return_temp:bool=False) -> torch.Tensor:
         x = self._fwd_no_skip_nf(x)
-        x = (self.finish[0](x) / torch.clamp(self.finish[1](x), min=1e-6)) if not return_temp else self.finish[1](x)
-        return x
+        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
+        t  = self.finish[1][1](self._add_noise(self.finish[1][0](x)))
+        return xh / torch.clamp(t, min=1e-6) if not return_temp else t
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         n_classes = self.ord_params[2]
-        fc = self._conv(in_c, n_classes, 1, bias=bias)
-        fc_temp = nn.Sequential(self._conv(in_c, 1, 1, bias=bias), nn.Softplus())
-        return nn.ModuleList([fc, fc_temp])
+        f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                                         self._conv(in_c, n_classes, 1, bias=bias))])
+        t = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                                         self._conv(in_c, 1, 1, bias=False),
+                                         nn.Softplus())])
+        return nn.ModuleList([f, t])
 
     def predict(self, x:torch.Tensor, return_temp:bool=False, **kwargs) -> torch.Tensor:
         y_hat = self.forward(x, return_temp)
