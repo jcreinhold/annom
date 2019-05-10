@@ -111,15 +111,18 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True, **kwargs):
+    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True, coord:bool=True, **kwargs):
         self.n_samp = n_samp
         self.mlv = min_logvar
         self.edge = edge
         self.laplacian = laplacian
+        self.coord = coord
+        if coord: kwargs['n_input'] += 3 if kwargs['is_3d'] else 2
         super().__init__(n_layers, enable_dropout=True, **kwargs)
         self.criterion = HotLoss() if not laplacian else HotLaplacianLoss()
 
     def forward(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
+        if self.coord: x = self._add_coords(x)
         x = self._fwd_skip(x, **kwargs) if not self.no_skip else self._fwd_no_skip(x, **kwargs)
         return x
 
@@ -138,6 +141,13 @@ class HotNet(Unet):
         xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
         s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
         return xh, s
+
+    def _add_coords(self, x:torch.Tensor):
+        sz = x.size()
+        dims = [torch.arange(s, dtype=torch.float32) for s in sz[2:]]
+        grid = [g.to(x.device).expand(sz[0],*sz[2:]).unsqueeze(1) for g in torch.meshgrid(*dims)]
+        x = torch.cat((x, *grid), dim=1)
+        return x
 
     def _edge(self, x):
         xn = x.cpu().detach().numpy()
