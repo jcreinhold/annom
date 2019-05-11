@@ -41,7 +41,7 @@ class TestLoss(unittest.TestCase):
         self.assertEqual(loss.item(), 0)
 
     def test_ord(self):
-        ol = OrdLoss((0,1,2), 'cpu', is_3d=False)
+        ol = OrdLoss((0,1,2), is_3d=False)
         x, y = torch.zeros((2,2,2,2)), torch.zeros((2,2,2))
         x[:,0,:,:] = 1
         x[:,0,0,0] = 0
