@@ -111,12 +111,14 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True, coord:bool=True, **kwargs):
+    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True,
+                 coord:bool=True, cross:bool=True, **kwargs):
         self.n_samp = n_samp
         self.mlv = min_logvar
         self.edge = edge
         self.laplacian = laplacian
         self.coord = coord
+        self.cross = cross
         if coord: kwargs['n_input'] += 3 if kwargs['is_3d'] else 2
         super().__init__(n_layers, enable_dropout=True, **kwargs)
         self.criterion = HotLoss() if not laplacian else HotLaplacianLoss()
@@ -127,19 +129,26 @@ class HotNet(Unet):
         return x
 
     def _fwd_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
+        return self._fwd(x, True, **kwargs)
+
+    def _fwd_no_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
+        return self._fwd(x, False, **kwargs)
+
+    def _fwd(self, x:torch.Tensor, skip:bool, **kwargs):
         if self.edge: edge = self._edge(x)
-        x = self._fwd_skip_nf(x)
+        x = self._fwd_skip_nf(x) if skip else self._fwd_no_skip_nf(x)
         if self.edge: x = torch.cat((x, edge), dim=1)
+        return self._finish_cross(x) if self.cross else self._finish_no_cross(x)
+
+    def _finish_no_cross(self, x:torch.Tensor):
         xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
         s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
         return xh, s
 
-    def _fwd_no_skip(self, x:torch.Tensor, **kwargs) -> Tuple[torch.Tensor,torch.Tensor]:
-        if self.edge: edge = self._edge(x)
-        x = self._fwd_no_skip_nf(x)
-        if self.edge: x = torch.cat((x, edge), dim=1)
-        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
-        s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
+    def _finish_cross(self, x:torch.Tensor):
+        c = self._add_noise(self.finish[0][0](x)) + self._add_noise(self.finish[1][0](x))
+        xh = self.finish[0][1](c)
+        s  = torch.clamp(self.finish[1][1](c),min=self.mlv)
         return xh, s
 
     def _add_coords(self, x:torch.Tensor):
