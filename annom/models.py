@@ -61,10 +61,10 @@ class OrdNet(Unet):
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         n_classes = self.ord_params[2]
         f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
                                          self._conv(in_c, n_classes, 1, bias=bias))])
         t = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
                                          self._conv(in_c, 1, 1, bias=False),
                                          nn.Softplus())])
         return nn.ModuleList([f, t])
@@ -157,10 +157,10 @@ class HotNet(Unet):
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         if self.edge: in_c = in_c + 2
         f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
                                          self._conv(in_c, out_c, 1, bias=bias))])
         s = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
                                          self._conv(in_c, out_c, 1, bias=False))])
         return nn.ModuleList([f, s])
 
