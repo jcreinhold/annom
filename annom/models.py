@@ -146,7 +146,7 @@ class HotNet(Unet):
         return xh, s
 
     def _finish_cross(self, x:torch.Tensor):
-        c = self._add_noise(self.finish[0][0](x)) + self._add_noise(self.finish[1][0](x))
+        c = self._add_noise(torch.cat((self.finish[0][0](x), self.finish[1][0](x)), dim=1))
         xh = self.finish[0][1](c)
         s  = torch.clamp(self.finish[1][1](c),min=self.mlv)
         return xh, s
@@ -165,11 +165,12 @@ class HotNet(Unet):
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         if self.edge: in_c = in_c + 2
+        mid_c = in_c if not self.cross else 2 * in_c
         f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
+                           nn.Sequential(self._conv_act(mid_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
                                          self._conv(in_c, out_c, 1, bias=bias))])
         s = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           nn.Sequential(self._conv_act(mid_c, in_c, 3, self.act, self.norm),
                                          self._conv(in_c, out_c, 1, bias=False))])
         return nn.ModuleList([f, s])
 
