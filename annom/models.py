@@ -48,25 +48,31 @@ class OrdNet(Unet):
 
     def _fwd_skip(self, x:torch.Tensor, return_temp:bool=False) -> torch.Tensor:
         x = self._fwd_skip_nf(x)
-        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
-        t  = self.finish[1][1](self._add_noise(self.finish[1][0](x)))
+        xh, t = x, x
+        for fxh in self.finish[0][0:2]: xh = self._add_noise(fxh(xh))
+        for ft in self.finish[1][0:2]:   t = self._add_noise(ft(t))
+        xh = self.finish[0][2](xh)
+        t  = self.finish[1][2](t)
         return xh / torch.clamp(t, min=1e-6) if not return_temp else t
 
     def _fwd_no_skip(self, x:torch.Tensor, return_temp:bool=False) -> torch.Tensor:
         x = self._fwd_no_skip_nf(x)
-        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
-        t  = self.finish[1][1](self._add_noise(self.finish[1][0](x)))
+        xh, t = x, x
+        for fxh in self.finish[0][0:2]: xh = self._add_noise(fxh(xh))
+        for ft in self.finish[1][0:2]:   t = self._add_noise(ft(t))
+        xh = self.finish[0][2](xh)
+        t  = self.finish[1][2](t)
         return xh / torch.clamp(t, min=1e-6) if not return_temp else t
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         n_classes = self.ord_params[2]
         f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
-                                         self._conv(in_c, n_classes, 1, bias=bias))])
+                           self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
+                           self._conv(in_c, n_classes, 1, bias=bias)])
         t = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                                         self._conv(in_c, 1, 1, bias=False),
-                                         nn.Softplus())])
+                           self._conv_act(in_c, in_c, 3, self.act, self.norm),
+                           self._conv(in_c, 1, 1, bias=False),
+                           nn.Softplus()])
         return nn.ModuleList([f, t])
 
     def predict(self, x:torch.Tensor, return_temp:bool=False, **kwargs) -> torch.Tensor:
@@ -144,14 +150,17 @@ class HotNet(Unet):
         return self._finish_cross(x) if self.cross else self._finish_no_cross(x)
 
     def _finish_no_cross(self, x:torch.Tensor):
-        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
-        s  = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))),min=self.mlv)
+        xh, s = x, x
+        for fxh in self.finish[0][0:2]: xh = self._add_noise(fxh(xh))
+        for fs in self.finish[1][0:2]:   s = self._add_noise(fs(s))
+        xh = self.finish[0][2](xh)
+        s = torch.clamp(self.finish[1][2](s), min=self.mlv)
         return xh, s
 
     def _finish_cross(self, x:torch.Tensor):
         c = self._add_noise(torch.cat((self.finish[0][0](x), self.finish[1][0](x)), dim=1))
-        xh = self.finish[0][1](c)
-        s  = torch.clamp(self.finish[1][1](c),min=self.mlv)
+        xh = self.finish[0][2](self._add_noise(self.finish[0][1](c)))
+        s  = torch.clamp(self.finish[0][2](self._add_noise(self.finish[1][1](c))),min=self.mlv)
         return xh, s
 
     def _add_coords(self, x:torch.Tensor):
@@ -170,11 +179,11 @@ class HotNet(Unet):
         if self.edge: in_c = in_c + 2
         mid_c = in_c if not self.cross else 2 * in_c
         f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(mid_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
-                                         self._conv(in_c, out_c, 1, bias=bias))])
+                           self._conv_act(mid_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
+                           self._conv(in_c, out_c, 1, bias=bias)])
         s = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           nn.Sequential(self._conv_act(mid_c, in_c, 3, self.act, self.norm),
-                                         self._conv(in_c, out_c, 1, bias=False))])
+                           self._conv_act(mid_c, in_c, 3, self.act, self.norm),
+                           self._conv(in_c, out_c, 1, bias=False)])
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
