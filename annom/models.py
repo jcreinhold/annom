@@ -118,9 +118,9 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True,
+    def __init__(self, n_layers:int, monte_carlo:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True,
                  coord:bool=True, cross:bool=True, net_init:bool=False, uncertainty:str='predictive', **kwargs):
-        self.n_samp = n_samp
+        self.n_samp = monte_carlo or 50
         self.mlv = min_logvar
         self.edge = edge
         self.laplacian = laplacian
