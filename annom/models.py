@@ -23,6 +23,7 @@ import torch
 from torch import nn
 
 from synthtorch import Unet
+from .errors import AnnomError
 from .loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss, HotLossInit
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,10 @@ class HotNet(Unet):
         self.laplacian = laplacian
         self.coord = coord
         self.cross = cross
-        self.uncertainty = uncertainty
+        self.uncertainty = uncertainty if uncertainty is not None else 'predictive'
+        if self.uncertainty not in ('predictive', 'aleatoric', 'epistemic'):
+            raise AnnomError(f'Uncertainty type: {self.uncertainty}, not valid')
+        logger.debug(f'Uncertainty type: {self.uncertainty}')
         if coord: kwargs['n_input'] += 3 if kwargs['is_3d'] else 2
         super().__init__(n_layers, enable_dropout=True, **kwargs)
         if not net_init:
@@ -189,13 +193,10 @@ class HotNet(Unet):
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
         if self.uncertainty == 'epistemic':
-            logger.debug('Uncertainty type: epistemic')
             return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
         elif self.uncertainty == 'aleatoric':
-            logger.debug('Uncertainty type: aleatoric')
             return torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
         else:
-            logger.debug('Uncertainty type: predictive')
             return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2 + \
                    torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
 
@@ -205,5 +206,3 @@ class HotNet(Unet):
         s = torch.stack([o[1] for o in out])
         if return_temp: return self._calc_uncertainty(yhat, s)
         return torch.mean(yhat, dim=0)
-
-
