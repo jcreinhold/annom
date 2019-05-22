@@ -118,13 +118,14 @@ class HotNet(Unet):
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
     def __init__(self, n_layers:int, n_samp:int=50, min_logvar:float=np.log(1e-6), edge:bool=True, laplacian:bool=True,
-                 coord:bool=True, cross:bool=True, net_init:bool=False, **kwargs):
+                 coord:bool=True, cross:bool=True, net_init:bool=False, uncertainty:str='predictive', **kwargs):
         self.n_samp = n_samp
         self.mlv = min_logvar
         self.edge = edge
         self.laplacian = laplacian
         self.coord = coord
         self.cross = cross
+        self.uncertainty = uncertainty
         if coord: kwargs['n_input'] += 3 if kwargs['is_3d'] else 2
         super().__init__(n_layers, enable_dropout=True, **kwargs)
         if not net_init:
@@ -187,10 +188,16 @@ class HotNet(Unet):
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
-        v1 = torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
-        v2 = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
-        samp_var = v1 + v2
-        return samp_var
+        if self.uncertainty == 'epistemic':
+            logger.debug('Uncertainty type: epistemic')
+            return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
+        elif self.uncertainty == 'aleatoric':
+            logger.debug('Uncertainty type: aleatoric')
+            return torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
+        else:
+            logger.debug('Uncertainty type: predictive')
+            return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2 + \
+                   torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
 
     def predict(self, x:torch.Tensor, return_temp:bool=False, **kwargs) -> torch.Tensor:
         out = [self.forward(x) for _ in range(self.n_samp)]
