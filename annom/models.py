@@ -192,13 +192,11 @@ class HotNet(Unet):
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
-        if self.uncertainty == 'epistemic':
-            return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
-        elif self.uncertainty == 'aleatoric':
-            return torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
-        else:
-            return torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2 + \
-                   torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
+        epistemic = torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
+        aleatoric = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
+        if self.uncertainty == 'epistemic': return epistemic
+        elif self.uncertainty == 'aleatoric': return aleatoric
+        else: return (epistemic + aleatoric)
 
     def predict(self, x:torch.Tensor, return_temp:bool=False, **kwargs) -> torch.Tensor:
         out = [self.forward(x) for _ in range(self.n_samp)]
