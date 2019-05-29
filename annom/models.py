@@ -67,12 +67,13 @@ class OrdNet(Unet):
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         n_classes = self.ord_params[2]
-        f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           self._conv_act(in_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
-                           self._conv(in_c, n_classes, 1, bias=bias)])
-        t = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           self._conv(in_c, 1, 1, bias=False),
+        ksz = tuple([1 for _ in self.kernel_sz])
+        f = nn.ModuleList([self._conv_act(in_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv_act(in_c, in_c, self.kernel_sz, 'softmax' if self.softmax else self.act, self.norm),
+                           self._conv(in_c, n_classes, ksz, bias=bias)])
+        t = nn.ModuleList([self._conv_act(in_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv_act(in_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv(in_c, 1, ksz, bias=False),
                            nn.Softplus()])
         return nn.ModuleList([f, t])
 
@@ -106,8 +107,9 @@ class LRSDNet(Unet):
         return x
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
-        lr = self._conv(in_c, out_c, 1, bias=bias)
-        s = self._conv(in_c, out_c, 1, bias=bias)
+        ksz = tuple([1 for _ in self.kernel_sz])
+        lr = self._conv(in_c, out_c, ksz, bias=bias)
+        s = self._conv(in_c, out_c, ksz, bias=bias)
         return nn.ModuleList([lr, s])
 
     def predict(self, x:torch.Tensor, return_sparse:bool=False, **kwargs) -> torch.Tensor:
@@ -183,12 +185,13 @@ class HotNet(Unet):
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         if self.edge: in_c = in_c + 2
         mid_c = in_c if not self.cross else 2 * in_c
-        f = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           self._conv_act(mid_c, in_c, 3, 'softmax' if self.softmax else self.act, self.norm),
-                           self._conv(in_c, out_c, 1, bias=bias)])
-        s = nn.ModuleList([self._conv_act(in_c, in_c, 3, self.act, self.norm),
-                           self._conv_act(mid_c, in_c, 3, self.act, self.norm),
-                           self._conv(in_c, out_c, 1, bias=False)])
+        lksz = tuple([1 for _ in self.kernel_sz])
+        f = nn.ModuleList([self._conv_act(in_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv_act(mid_c, in_c, self.kernel_sz, 'softmax' if self.softmax else self.act, self.norm),
+                           self._conv(in_c, out_c, lksz, bias=bias)])
+        s = nn.ModuleList([self._conv_act(in_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv_act(mid_c, in_c, self.kernel_sz, self.act, self.norm),
+                           self._conv(in_c, out_c, lksz, bias=False)])
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
