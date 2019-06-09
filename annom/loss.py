@@ -85,13 +85,6 @@ class OrdLoss(nn.Module):
         return self.ce_weight * CE + self.mae_weight * MAE
 
 
-class HotLossInit(nn.Module):
-    def forward(self, out:torch.Tensor, y:torch.Tensor):
-        yhat, _ = out
-        loss = F.mse_loss(yhat, y)
-        return loss
-
-
 class HotLoss(nn.Module):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, s = out
