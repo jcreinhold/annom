@@ -133,17 +133,17 @@ class HotNet(Unet):
         self.criterion = HotLoss() if not laplacian else HotLaplacianLoss()
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
-        xh = self.finish[0](x)
-        s = torch.clamp(self.finish[1](x), min=self.mlv)
+        xh = self.finish[0][1](self._add_noise(self.finish[0][0](x)))
+        s = torch.clamp(self.finish[1][1](self._add_noise(self.finish[1][0](x))), min=self.mlv)
         return xh, s
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         ksz = (3,3,3) if self.init_3d else self.kernel_sz
         kszf = tuple([1 for _ in self.kernel_sz])
-        f = nn.Sequential(self._conv_act(in_c, in_c, ksz, self.act, self.norm),
-                          self._conv(in_c, out_c, kszf, bias=bias))
-        s = nn.Sequential(self._conv_act(in_c, in_c, ksz, self.act, self.norm),
-                          self._conv(in_c, out_c, kszf, bias=bias))
+        f = nn.ModuleList([self._conv_act(in_c, in_c, ksz, self.act, self.norm),
+                           self._conv(in_c, out_c, kszf, bias=bias)])
+        s = nn.ModuleList([self._conv_act(in_c, in_c, ksz, self.act, self.norm),
+                           self._conv(in_c, out_c, kszf, bias=bias)])
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> torch.Tensor:
