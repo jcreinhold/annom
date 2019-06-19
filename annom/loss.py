@@ -78,6 +78,7 @@ class OrdLoss(nn.Module):
         return y_hat
 
     def forward(self, yd_hat:torch.Tensor, y:torch.Tensor):
+        yd_hat = yd_hat[0]  # second entry in tuple is temperature
         yd = self._digitize(y)
         CE = self.ce(yd_hat, yd)
         y_hat = self.predict(yd_hat)
