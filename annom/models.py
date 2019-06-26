@@ -94,12 +94,20 @@ class HotNet(Unet):
         aleatoric = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
         return epistemic, aleatoric
 
+    def _find_best_yhat(self, yhat):
+        dims = list(range(1, yhat.dim()))
+        ym = torch.mean(yhat, dim=0, keepdim=True)
+        ymse = torch.mean((yhat - ym)**2, dim=dims)
+        yi = torch.argmin(ymse)
+        return yhat[yi]
+
     def predict(self, x:torch.Tensor, **kwargs) -> torch.Tensor:
         out = [self.forward(x) for _ in range(self.n_samp)]
         yhat = torch.stack([o[0] for o in out]).cpu().detach()
         s = torch.stack([o[1] for o in out]).cpu().detach()
         e, a = self._calc_uncertainty(yhat, s)
-        return torch.cat((torch.mean(yhat, dim=0), e, a), dim=1)
+        y = self._find_best_yhat(yhat)
+        return torch.cat((y, e, a), dim=1)
 
 
 class LRSDNet(Unet):
