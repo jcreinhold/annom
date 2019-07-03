@@ -22,7 +22,7 @@ import torch
 from torch import nn
 
 from synthtorch import Unet
-from .loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
+from .loss import HotGaussianLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,13 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, monte_carlo:int=50, min_logvar:float=np.log(1e-6), laplacian:bool=True, **kwargs):
+    def __init__(self, n_layers:int, monte_carlo:int=50, min_logvar:float=np.log(1e-6), laplacian:bool=True,
+                 beta:float=1., **kwargs):
         self.n_samp = monte_carlo or 50
         self.mlv = min_logvar
         self.laplacian = laplacian
         super().__init__(n_layers, enable_dropout=True, **kwargs)
-        self.criterion = HotLoss() if not laplacian else HotLaplacianLoss()
+        self.criterion = HotGaussianLoss(beta) if not laplacian else HotLaplacianLoss(beta)
         self.n_output += 2
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:

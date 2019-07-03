@@ -87,14 +87,23 @@ class OrdLoss(nn.Module):
 
 
 class HotLoss(nn.Module):
+    def __init__(self, beta:float=1.):
+        super(HotLoss, self).__init__()
+        self.beta = beta
+
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        raise NotImplementedError
+
+
+class HotGaussianLoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, s = out
-        loss = torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + s))
+        loss = torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + self.beta * s))
         return loss
 
 
-class HotLaplacianLoss(nn.Module):
+class HotLaplacianLoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, s = out
-        loss = torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + s)
+        loss = torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + self.beta * s)
         return loss
