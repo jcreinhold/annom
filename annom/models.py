@@ -95,11 +95,10 @@ class HotNet(Unet):
         return epistemic, aleatoric
 
     def _calc_synth(self, x:torch.Tensor):
-        dp, nl = self.dropout_prob, self.noise_lvl
-        self.dropout_prob, self.noise_lvl = 0, 0
+        self.enable_dropout = False
         synth, _ = self.forward(x)
-        synth = synth.cpu().detach() * (1. - dp)
-        self.dropout_prob, self.noise_lvl = dp, nl
+        synth = synth.cpu().detach()
+        self.enable_dropout = True
         return synth
 
     def predict(self, x:torch.Tensor, **kwargs) -> torch.Tensor:
