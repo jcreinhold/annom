@@ -94,6 +94,8 @@ class HotLoss(nn.Module):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         raise NotImplementedError
 
+    def extra_repr(self): return f'beta={self.beta}'
+
 
 class HotGaussianLoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
