@@ -49,7 +49,7 @@ class OrdNet(Unet):
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
         n_classes = self.ord_params[2]
-        ksz = (3,3,3) if self.init_3d else self.kernel_sz
+        ksz = (3,3,3) if self.semi_3d > 0 else self.kernel_sz
         kszf = tuple([1 for _ in self.kernel_sz])
         f = nn.ModuleList([self._conv_act(in_c, in_c, ksz, 'softmax' if self.softmax else self.act, self.norm),
                            self._conv(in_c, n_classes, kszf, bias=bias)])
@@ -82,7 +82,7 @@ class HotNet(Unet):
         return xh, s
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
-        ksz = (3,3,3) if self.init_3d else self.kernel_sz
+        ksz = (3,3,3) if self.semi_3d > 0 else self.kernel_sz
         kszf = tuple([1 for _ in self.kernel_sz])
         f = nn.Sequential(self._conv_act(in_c, in_c, ksz, 'softmax' if self.softmax else self.act, self.norm),
                           self._conv(in_c, out_c, kszf, bias=bias))
@@ -117,7 +117,7 @@ class LRSDNet(Unet):
         return self.finish[0](x), self.finish[1](x)
 
     def _final(self, in_c:int, out_c:int, out_act:Optional[str]=None, bias:bool=False):
-        ksz = (3,3,3) if self.init_3d else self.kernel_sz
+        ksz = (3,3,3) if self.semi_3d > 0 else self.kernel_sz
         kszf = tuple([1 for _ in self.kernel_sz])
         lr = nn.Sequential(self._conv_act(in_c, in_c, ksz, 'softmax' if self.softmax else self.act, self.norm),
                           self._conv(in_c, out_c, kszf, bias=bias))
