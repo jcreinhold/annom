@@ -11,8 +11,10 @@ Author: Jacob Reinhold (jacob.reinhold@jhu.edu)
 Created on: Mar 11, 2018
 """
 
-__all__ = ['HotLoss',
+__all__ = ['HotGaussianLoss',
            'HotLaplacianLoss',
+           'HotMAEOnlyLoss',
+           'HotMSEOnlyLoss',
            'LRSDecompLoss',
            'OrdLoss']
 
@@ -95,6 +97,20 @@ class HotLoss(nn.Module):
         raise NotImplementedError
 
     def extra_repr(self): return f'beta={self.beta}'
+
+
+class HotMSEOnlyLoss(nn.Module):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        yhat, _ = out
+        loss = F.mse_loss(yhat, y)
+        return loss
+
+
+class HotMAEOnlyLoss(nn.Module):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        yhat, _ = out
+        loss = F.l1_loss(yhat, y)
+        return loss
 
 
 class HotGaussianLoss(HotLoss):

@@ -22,7 +22,7 @@ import torch
 from torch import nn
 
 from synthtorch import Unet
-from .loss import HotGaussianLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
+from .loss import *
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,10 @@ class HotNet(Unet):
         self.mlv = min_logvar
         self.laplacian = laplacian
         super().__init__(n_layers, enable_dropout=True, **kwargs)
-        self.criterion = HotGaussianLoss(beta) if not laplacian else HotLaplacianLoss(beta)
+        if beta > 0:
+            self.criterion = HotGaussianLoss(beta) if not laplacian else HotLaplacianLoss(beta)
+        else:
+            self.criterion = HotMSEOnlyLoss() if not laplacian else HotMAEOnlyLoss()
         self.n_output += 2
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
