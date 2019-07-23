@@ -94,7 +94,7 @@ class HotNet(Unet):
         return nn.ModuleList([f, s])
 
     def _calc_uncertainty(self, yhat, s) -> Tuple[torch.Tensor,torch.Tensor]:
-        epistemic = torch.mean(yhat**2,dim=0) - torch.mean(yhat,dim=0)**2
+        epistemic = torch.var(yhat,dim=0)
         aleatoric = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
         return epistemic, aleatoric
 
