@@ -14,7 +14,7 @@ import unittest
 
 import torch
 
-from annom.loss import HotLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
+from annom.loss import HotGaussianLoss, HotLaplacianLoss, LRSDecompLoss, OrdLoss
 
 
 class TestLoss(unittest.TestCase):
@@ -22,8 +22,8 @@ class TestLoss(unittest.TestCase):
     def setUp(self):
         pass
 
-    def test_hot(self):
-        hl = HotLoss()
+    def test_hot_gauss(self):
+        hl = HotGaussianLoss()
         x, y = (torch.zeros((2,1,2,2,2)), torch.zeros((2,1,2,2,2))), torch.zeros((2,1,2,2,2))
         loss = hl(x, y)
         self.assertEqual(loss.item(), 0)
@@ -42,11 +42,11 @@ class TestLoss(unittest.TestCase):
 
     def test_ord(self):
         ol = OrdLoss((0,1,2), is_3d=False)
-        x, y = torch.zeros((2,2,2,2)), torch.zeros((2,2,2))
+        x, y = torch.zeros((2,2,2,2)), torch.zeros((2,1,2))
         x[:,0,:,:] = 1
         x[:,0,0,0] = 0
         x[:,1,0,0] = 1
-        y[:,0,0] = 1
+        y[0,0] = 1
         loss = ol(x, y)
         self.assertLess(loss.item(), 2)
 
