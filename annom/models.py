@@ -105,6 +105,9 @@ class HotNet(Unet):
         e, a = self._calc_uncertainty(yhat, s)
         return torch.cat((torch.mean(yhat, dim=0), e, a), dim=1)
 
+    def freeze(self):
+        super().freeze()
+        for p in self.finish[0].parameters(): p.requires_grad = False
 
 class LRSDNet(Unet):
     """
