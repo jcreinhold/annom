@@ -39,7 +39,7 @@ class OrdNet(Unet):
         # setup and store instance parameters
         self.ord_params = ord_params
         super().__init__(n_layers, **kwargs)
-        self.criterion = OrdLoss(ord_params, self.is_3d)
+        self.criterion = OrdLoss(ord_params, self.dim == 3)
         self.n_output += 1
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
