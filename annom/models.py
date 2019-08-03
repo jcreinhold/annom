@@ -10,7 +10,8 @@ Author: Jacob Reinhold (jacob.reinhold@jhu.edu)
 Created on: Mar 12, 2019
 """
 
-__all__ = ['HotNet',
+__all__ = ['BurnNet',
+           'HotNet',
            'LRSDNet',
            'OrdNet']
 
@@ -23,6 +24,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from synthtorch import Unet
+from synthtorch.util.helper import get_loss
 from .loss import *
 
 logger = logging.getLogger(__name__)
@@ -140,7 +142,7 @@ class BurnNet(nn.Module):
     """
     defines a N-D (multinomial) variational U-Net
     """
-    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, **kwargs):
+    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
         super().__init__()
         self.zdim = zdim
         self.temperature = temperature
@@ -148,30 +150,36 @@ class BurnNet(nn.Module):
         self.encoder = Unet(n_layers, enable_dropout=True, n_output=zdim, **kwargs)
         _ = kwargs.pop('n_input')
         self.decoder = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=n_output, **kwargs)
+        self.laplacian = laplacian
+        self.criterion = HotMSEOnlyLoss() if not laplacian else HotMAEOnlyLoss()
+        self.n_output = n_output + zdim
+        del self.encoder.criterion, self.decoder.criterion
 
     def forward(self, x:torch.Tensor, **kwargs):
         z = self.encoder.forward(x, **kwargs)
-        zgs = self.sample_gumbel_softmax(z)
-        x = self.decoder.forward(zgs, **kwargs)
-        return x
+        z = self.sample_gumbel_softmax(z)
+        x = self.decoder.forward(z, **kwargs)
+        return (x, z)
 
-    def sample_gumbel_softmax(self, alpha, eps=1e-12):
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        return torch.cat(self.forward(x), dim=1)
+
+    def sample_gumbel_softmax(self, logit, eps=1e-12):
         if self.training:
             # Sample from gumbel distribution
-            unif = torch.rand(alpha.size()).to(alpha.device)
+            unif = torch.rand(logit.size()).to(logit.device)
             gumbel = -torch.log(-torch.log(unif + eps) + eps)
             # Reparameterize to create gumbel softmax sample
-            log_alpha = torch.log(alpha + eps)
-            logit = (log_alpha + gumbel) / self.temperature
+            logit = (logit + gumbel) / self.temperature
             return F.softmax(logit, dim=1)
         else:
             # In reconstruction mode, pick most likely sample
-            _, max_alpha = torch.max(alpha, dim=1)
-            one_hot_samples = torch.zeros(alpha.size())
-            # On axis 1 of one_hot_samples, scatter the value 1 at indices
-            # max_alpha. Note the view is because scatter_ only accepts 2D
-            # tensors.
-            one_hot_samples.scatter_(1, max_alpha.view(-1, 1).detach().cpu(), 1)
-            one_hot_samples = one_hot_samples.to(alpha.device)
+            idxs = torch.argmax(logit, dim=1, keepdim=True)
+            one_hot_samples = torch.zeros_like(logit)
+            one_hot_samples.scatter_(1, idxs, 1.)
             return one_hot_samples
 
+    def freeze(self):
+        self.encoder.freeze()
+        for p in self.encoder.finish.parameters(): p.requires_grad = False
+        self.decoder.freeze()
