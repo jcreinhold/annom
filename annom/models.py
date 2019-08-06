@@ -11,6 +11,7 @@ Created on: Mar 12, 2019
 """
 
 __all__ = ['BurnNet',
+           'Burn2Net',
            'HotNet',
            'LRSDNet',
            'OrdNet']
@@ -25,6 +26,7 @@ import torch.nn.functional as F
 
 from synthtorch import Unet
 from synthtorch.util.helper import get_loss
+from .errors import *
 from .loss import *
 
 logger = logging.getLogger(__name__)
@@ -183,3 +185,44 @@ class BurnNet(nn.Module):
         self.encoder.freeze()
         for p in self.encoder.finish.parameters(): p.requires_grad = False
         self.decoder.freeze()
+
+
+class Burn2Net(BurnNet):
+    """
+    defines a N-D (multinomial) variational U-Net for two inputs, outputs
+    """
+
+    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
+        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
+        del self.encoder, self.decoder
+        ni, no = kwargs.pop('n_input'), kwargs.pop('n_output')
+        if ni != no or ni != 2: raise AnnomError('Burn2Net requires the number of input and output both to be 2.')
+        self.encoder1 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=zdim, **kwargs)
+        self.encoder2 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=zdim, **kwargs)
+        self.decoder1 = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=1, **kwargs)
+        self.decoder2 = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=1, **kwargs)
+        self.criterion = Burn2MSELoss() if not laplacian else Burn2MAELoss()
+        self.n_output = 2 + (2 * zdim)
+        del self.encoder1.criterion, self.decoder1.criterion, self.encoder2.criterion, self.decoder2.criterion
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        x1, x2 = x[:,0:1,...], x[:,1:2,...]
+        z1 = self.encoder1.forward(x1, **kwargs)
+        z2 = self.encoder2.forward(x2, **kwargs)
+        zg1 = self.sample_gumbel_softmax(z1)
+        zg2 = self.sample_gumbel_softmax(z2)
+        y1 = self.decoder1.forward(zg1, **kwargs)
+        y2 = self.decoder2.forward(zg2, **kwargs)
+        return (y1, y2, z1, z2, zg1, zg2)
+
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        x1, x2, _, _, zg1, zg2 = self.forward(x)
+        return torch.cat((x1, x2, zg1, zg2), dim=1)
+
+    def freeze(self):
+        self.encoder1.freeze()
+        for p in self.encoder1.finish.parameters(): p.requires_grad = False
+        self.decoder1.freeze()
+        self.encoder2.freeze()
+        for p in self.encoder2.finish.parameters(): p.requires_grad = False
+        self.decoder2.freeze()

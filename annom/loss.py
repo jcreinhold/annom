@@ -11,7 +11,9 @@ Author: Jacob Reinhold (jacob.reinhold@jhu.edu)
 Created on: Mar 11, 2018
 """
 
-__all__ = ['HotGaussianLoss',
+__all__ = ['Burn2MSELoss',
+           'Burn2MAELoss',
+           'HotGaussianLoss',
            'HotLaplacianLoss',
            'HotMAEOnlyLoss',
            'HotMSEOnlyLoss',
@@ -125,3 +127,23 @@ class HotLaplacianLoss(HotLoss):
         yhat, s = out
         loss = torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + self.beta * s)
         return loss
+
+
+class Burn2MSELoss(HotLoss):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        x1, x2, z1, z2, _, _ = out
+        mse_loss1 = F.mse_loss(x1, y[:,0:1,...])
+        mse_loss2 = F.mse_loss(x2, y[:,1:2,...])
+        kl1 = F.kl_div(F.log_softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='batchmean')
+        kl2 = F.kl_div(F.log_softmax(z2,dim=1), F.softmax(z1,dim=1), reduction='batchmean')
+        return mse_loss1 + mse_loss2 + self.beta * (kl1 + kl2)
+
+
+class Burn2MAELoss(HotLoss):
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        x1, x2, z1, z2, _, _ = out
+        mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
+        mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
+        kl1 = F.kl_div(F.log_softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='batchmean')
+        kl2 = F.kl_div(F.log_softmax(z2,dim=1), F.softmax(z1,dim=1), reduction='batchmean')
+        return mae_loss1 + mae_loss2 + self.beta * (kl1 + kl2)
