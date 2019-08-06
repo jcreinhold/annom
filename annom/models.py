@@ -12,6 +12,8 @@ Created on: Mar 12, 2019
 
 __all__ = ['BurnNet',
            'Burn2Net',
+           'Burn2NetP12',
+           'Burn2NetP21',
            'HotNet',
            'LRSDNet',
            'OrdNet']
@@ -191,7 +193,6 @@ class Burn2Net(BurnNet):
     """
     defines a N-D (multinomial) variational U-Net for two inputs, outputs
     """
-
     def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
         super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
         del self.encoder, self.decoder
@@ -226,3 +227,35 @@ class Burn2Net(BurnNet):
         self.encoder2.freeze()
         for p in self.encoder2.finish.parameters(): p.requires_grad = False
         self.decoder2.freeze()
+
+
+class Burn2NetP12(Burn2Net):
+    """ predict second class from first """
+    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
+        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
+        self.n_output = 1 + zdim
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        z = self.encoder1.forward(x, **kwargs)
+        zg = self.sample_gumbel_softmax(z)
+        y = self.decoder2.forward(zg, **kwargs)
+        return (y, zg)
+
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        return torch.cat(self.forward(x), dim=1)
+
+
+class Burn2NetP21(Burn2Net):
+    """ predict first class from second """
+    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
+        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
+        self.n_output = 1 + zdim
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        z = self.encoder2.forward(x, **kwargs)
+        zg = self.sample_gumbel_softmax(z)
+        y = self.decoder1.forward(zg, **kwargs)
+        return (y, zg)
+
+    def predict(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        return torch.cat(self.forward(x), dim=1)
