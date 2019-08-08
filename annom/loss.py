@@ -134,9 +134,8 @@ class Burn2MSELoss(HotLoss):
         x1, x2, z1, z2, _, _ = out
         mse_loss1 = F.mse_loss(x1, y[:,0:1,...])
         mse_loss2 = F.mse_loss(x2, y[:,1:2,...])
-        kl1 = F.kl_div(F.log_softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='batchmean')
-        kl2 = F.kl_div(F.log_softmax(z2,dim=1), F.softmax(z1,dim=1), reduction='batchmean')
-        return mse_loss1 + mse_loss2 + self.beta * (kl1 + kl2)
+        z_penalty= F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
+        return mse_loss1 + mse_loss2 + self.beta * (z_penalty)
 
 
 class Burn2MAELoss(HotLoss):
@@ -144,6 +143,5 @@ class Burn2MAELoss(HotLoss):
         x1, x2, z1, z2, _, _ = out
         mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
         mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
-        kl1 = F.kl_div(F.log_softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='batchmean')
-        kl2 = F.kl_div(F.log_softmax(z2,dim=1), F.softmax(z1,dim=1), reduction='batchmean')
-        return mae_loss1 + mae_loss2 + self.beta * (kl1 + kl2)
+        z_penalty= F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
+        return mae_loss1 + mae_loss2 + self.beta * (z_penalty)

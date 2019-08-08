@@ -27,9 +27,9 @@ from torch import nn
 import torch.nn.functional as F
 
 from synthtorch import Unet
-from synthtorch.util.helper import get_loss
 from .errors import *
 from .loss import *
+from .util import *
 
 logger = logging.getLogger(__name__)
 
@@ -73,16 +73,15 @@ class HotNet(Unet):
     """
     defines a 2d or 3d uncertainty-calculating unet based on vanilla regression in pytorch
     """
-    def __init__(self, n_layers:int, monte_carlo:int=50, min_logvar:float=np.log(1e-6), laplacian:bool=True,
-                 beta:float=1., **kwargs):
+    def __init__(self, n_layers:int, monte_carlo:int=50, min_logvar:float=np.log(1e-6), beta:float=1., **kwargs):
         self.n_samp = monte_carlo or 50
         self.mlv = min_logvar
-        self.laplacian = laplacian
         super().__init__(n_layers, enable_dropout=True, **kwargs)
+        self.laplacian = use_laplacian(self.loss)
         if beta > 0:
-            self.criterion = HotGaussianLoss(beta) if not laplacian else HotLaplacianLoss(beta)
+            self.criterion = HotGaussianLoss(beta) if not self.laplacian else HotLaplacianLoss(beta)
         else:
-            self.criterion = HotMSEOnlyLoss() if not laplacian else HotMAEOnlyLoss()
+            self.criterion = HotMSEOnlyLoss() if not self.laplacian else HotMAEOnlyLoss()
         self.n_output += 2
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
@@ -146,17 +145,17 @@ class BurnNet(nn.Module):
     """
     defines a N-D (multinomial) variational U-Net
     """
-    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None, **kwargs):
         super().__init__()
-        self.zdim = zdim
+        self.zdim = latent_size
         self.temperature = temperature
         n_output = kwargs.pop('n_output', 1)
-        self.encoder = Unet(n_layers, enable_dropout=True, n_output=zdim, **kwargs)
+        self.encoder = Unet(n_layers, enable_dropout=True, n_output=latent_size, **kwargs)
         _ = kwargs.pop('n_input')
-        self.decoder = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=n_output, **kwargs)
-        self.laplacian = laplacian
-        self.criterion = HotMSEOnlyLoss() if not laplacian else HotMAEOnlyLoss()
-        self.n_output = n_output + zdim
+        self.decoder = Unet(n_layers, enable_dropout=True, n_input=latent_size, n_output=n_output, **kwargs)
+        self.laplacian = use_laplacian(loss)
+        self.criterion = HotMSEOnlyLoss() if not self.laplacian else HotMAEOnlyLoss()
+        self.n_output = n_output + latent_size
         del self.encoder.criterion, self.decoder.criterion
 
     def forward(self, x:torch.Tensor, **kwargs):
@@ -168,18 +167,19 @@ class BurnNet(nn.Module):
     def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return torch.cat(self.forward(x), dim=1)
 
-    def sample_gumbel_softmax(self, logit, eps=1e-12):
+    def sample_gumbel_softmax(self, x, eps=1e-12):
         if self.training:
+            x = F.log_softmax(x,dim=1)
             # Sample from gumbel distribution
-            unif = torch.rand(logit.size()).to(logit.device)
+            unif = torch.rand_like(x)
             gumbel = -torch.log(-torch.log(unif + eps) + eps)
             # Reparameterize to create gumbel softmax sample
-            logit = (logit + gumbel) / self.temperature
-            return F.softmax(logit, dim=1)
+            x = (x + gumbel) / self.temperature
+            return F.softmax(x, dim=1)
         else:
             # In reconstruction mode, pick most likely sample
-            idxs = torch.argmax(logit, dim=1, keepdim=True)
-            one_hot_samples = torch.zeros_like(logit)
+            idxs = torch.argmax(x, dim=1, keepdim=True)
+            one_hot_samples = torch.zeros_like(x)
             one_hot_samples.scatter_(1, idxs, 1.)
             return one_hot_samples
 
@@ -193,17 +193,17 @@ class Burn2Net(BurnNet):
     """
     defines a N-D (multinomial) variational U-Net for two inputs, outputs
     """
-    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
-        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, **kwargs):
+        super().__init__(n_layers, latent_size, temperature, **kwargs)
         del self.encoder, self.decoder
         ni, no = kwargs.pop('n_input'), kwargs.pop('n_output')
         if ni != no or ni != 2: raise AnnomError('Burn2Net requires the number of input and output both to be 2.')
-        self.encoder1 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=zdim, **kwargs)
-        self.encoder2 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=zdim, **kwargs)
-        self.decoder1 = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=1, **kwargs)
-        self.decoder2 = Unet(n_layers, enable_dropout=True, n_input=zdim, n_output=1, **kwargs)
-        self.criterion = Burn2MSELoss() if not laplacian else Burn2MAELoss()
-        self.n_output = 2 + (2 * zdim)
+        self.encoder1 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=latent_size, **kwargs)
+        self.encoder2 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=latent_size, **kwargs)
+        self.decoder1 = Unet(n_layers, enable_dropout=True, n_input=latent_size, n_output=1, **kwargs)
+        self.decoder2 = Unet(n_layers, enable_dropout=True, n_input=latent_size, n_output=1, **kwargs)
+        self.criterion = Burn2MSELoss() if not self.laplacian else Burn2MAELoss()
+        self.n_output = 2 + (2 * latent_size)
         del self.encoder1.criterion, self.decoder1.criterion, self.encoder2.criterion, self.decoder2.criterion
 
     def forward(self, x:torch.Tensor, **kwargs):
@@ -231,9 +231,9 @@ class Burn2Net(BurnNet):
 
 class Burn2NetP12(Burn2Net):
     """ predict second class from first """
-    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
-        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
-        self.n_output = 1 + zdim
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, **kwargs):
+        super().__init__(n_layers, latent_size, temperature, **kwargs)
+        self.n_output = 1 + latent_size
 
     def forward(self, x:torch.Tensor, **kwargs):
         z = self.encoder1.forward(x, **kwargs)
@@ -247,9 +247,9 @@ class Burn2NetP12(Burn2Net):
 
 class Burn2NetP21(Burn2Net):
     """ predict first class from second """
-    def __init__(self, n_layers:int, zdim:int=5, temperature:float=0.67, laplacian:bool=False, **kwargs):
-        super().__init__(n_layers, zdim, temperature, laplacian, **kwargs)
-        self.n_output = 1 + zdim
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, **kwargs):
+        super().__init__(n_layers, latent_size, temperature, **kwargs)
+        self.n_output = 1 + latent_size
 
     def forward(self, x:torch.Tensor, **kwargs):
         z = self.encoder2.forward(x, **kwargs)
