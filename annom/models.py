@@ -193,7 +193,7 @@ class Burn2Net(BurnNet):
     """
     defines a N-D (multinomial) variational U-Net for two inputs, outputs
     """
-    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, **kwargs):
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, beta:float=1., **kwargs):
         super().__init__(n_layers, latent_size, temperature, **kwargs)
         del self.encoder, self.decoder
         ni, no = kwargs.pop('n_input'), kwargs.pop('n_output')
@@ -202,7 +202,7 @@ class Burn2Net(BurnNet):
         self.encoder2 = Unet(n_layers, enable_dropout=True, n_input=1, n_output=latent_size, **kwargs)
         self.decoder1 = Unet(n_layers, enable_dropout=True, n_input=latent_size, n_output=1, **kwargs)
         self.decoder2 = Unet(n_layers, enable_dropout=True, n_input=latent_size, n_output=1, **kwargs)
-        self.criterion = Burn2MSELoss() if not self.laplacian else Burn2MAELoss()
+        self.criterion = Burn2MSELoss(beta) if not self.laplacian else Burn2MAELoss(beta)
         self.n_output = 2 + (2 * latent_size)
         del self.encoder1.criterion, self.decoder1.criterion, self.encoder2.criterion, self.decoder2.criterion
 
