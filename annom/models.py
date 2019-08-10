@@ -16,7 +16,8 @@ __all__ = ['BurnNet',
            'Burn2NetP21',
            'HotNet',
            'LRSDNet',
-           'OrdNet']
+           'OrdNet',
+           'UnburnNet']
 
 import logging
 from typing import Optional, Tuple
@@ -187,6 +188,39 @@ class BurnNet(nn.Module):
         self.encoder.freeze()
         for p in self.encoder.finish.parameters(): p.requires_grad = False
         self.decoder.freeze()
+
+
+class UnburnNet(BurnNet):
+    """
+    defines a N-D (multinomial) variational U-Net with uncertainty
+    """
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None,
+                 monte_carlo:int=50, min_logvar:float=np.log(1e-6), beta:float=1., **kwargs):
+        super().__init__(n_layers, latent_size, temperature, loss, **kwargs)
+        n_output, _ = kwargs.pop('n_output', 1), kwargs.pop('n_input')
+        self.decoder = HotNet(n_layers, monte_carlo, min_logvar, beta, n_input=latent_size, n_output=n_output, **kwargs)
+        self.criterion = self.decoder.criterion
+        del self.decoder.criterion
+        self.n_output += 2
+        self.n_samp = monte_carlo or 50
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        z = self.encoder.forward(x, **kwargs)
+        z = self.sample_gumbel_softmax(z)
+        x = self.decoder.forward(z, **kwargs)
+        return (x, z)
+
+    def _calc_uncertainty(self, yhat, s) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.decoder._calc_uncertainty(yhat, s)
+
+    def predict(self, x:torch.Tensor, **kwargs) -> torch.Tensor:
+        out = [self.forward(x) for _ in range(self.n_samp)]
+        yhat = torch.stack([o[0][0] for o in out]).cpu().detach()
+        s = torch.stack([o[0][1] for o in out]).cpu().detach()
+        z = torch.stack([o[1] for o in out]).cpu().detach()
+        del out  # try to save memory
+        e, a = self._calc_uncertainty(yhat, s)
+        return torch.cat((torch.mean(yhat, dim=0), e, a, torch.mean(z, dim=0)), dim=1)
 
 
 class Burn2Net(BurnNet):

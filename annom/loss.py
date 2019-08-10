@@ -117,6 +117,7 @@ class HotMAEOnlyLoss(nn.Module):
 
 class HotGaussianLoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
+        if isinstance(out[0], tuple): out = out[0]
         yhat, s = out
         loss = torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + self.beta * s))
         return loss
@@ -124,6 +125,7 @@ class HotGaussianLoss(HotLoss):
 
 class HotLaplacianLoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
+        if isinstance(out[0], tuple): out = out[0]
         yhat, s = out
         loss = torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + self.beta * s)
         return loss
