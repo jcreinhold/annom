@@ -17,6 +17,7 @@ __all__ = ['BurnNet',
            'HotNet',
            'LRSDNet',
            'OrdNet',
+           'Unburn2Net',
            'UnburnNet']
 
 import logging
@@ -206,9 +207,9 @@ class UnburnNet(BurnNet):
 
     def forward(self, x:torch.Tensor, **kwargs):
         z = self.encoder.forward(x, **kwargs)
-        z = self.sample_gumbel_softmax(z)
-        x = self.decoder.forward(z, **kwargs)
-        return (x, z)
+        zg = self.sample_gumbel_softmax(z)
+        x = self.decoder.forward(zg, **kwargs)
+        return (x, z, zg)
 
     def _calc_uncertainty(self, yhat, s) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.decoder._calc_uncertainty(yhat, s)
@@ -217,11 +218,58 @@ class UnburnNet(BurnNet):
         out = [self.forward(x) for _ in range(self.n_samp)]
         yhat = torch.stack([o[0][0] for o in out]).cpu().detach()
         s = torch.stack([o[0][1] for o in out]).cpu().detach()
-        z = torch.stack([o[1] for o in out]).cpu().detach()
+        z = torch.stack([o[2] for o in out]).cpu().detach()
         del out  # try to save memory
         e, a = self._calc_uncertainty(yhat, s)
         return torch.cat((torch.mean(yhat, dim=0), e, a, torch.mean(z, dim=0)), dim=1)
 
+
+class Unburn2Net(nn.Module):
+    """
+    defines a N-D (multinomial) variational U-Net with uncertainty for two inputs, outputs
+    """
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None,
+                 monte_carlo:int=50, min_logvar:float=np.log(1e-6), beta:float=1., **kwargs):
+        super().__init__()
+        _, _ = kwargs.pop('n_output', 1), kwargs.pop('n_input')
+        self.vae1 = UnburnNet(n_layers, latent_size, temperature, loss, monte_carlo, min_logvar, beta,
+                              n_input=1, n_output=1, **kwargs)
+        self.vae2 = UnburnNet(n_layers, latent_size, temperature, loss, monte_carlo, min_logvar, beta,
+                              n_input=1, n_output=1, **kwargs)
+        del self.vae1.criterion, self.vae2.criterion
+        self.laplacian = use_laplacian(loss)
+        self.criterion = Unburn2GaussianLoss(beta) if not self.laplacian else Unburn2LaplacianLoss(beta)
+        self.n_output = self.vae1.n_output + self.vae2.n_output
+        self.n_samp = monte_carlo or 50
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        x1, x2 = x[:,0:1,...], x[:,1:2,...]
+        x1 = self.vae1.forward(x1)
+        x2 = self.vae1.forward(x2)
+        return x1, x2
+
+    def _calc_uncertainty(self, yhat, s) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.vae1._calc_uncertainty(yhat, s)
+
+    def _extract(self, out, i):
+        yhat = torch.stack([o[i][0][0] for o in out]).cpu().detach()
+        s = torch.stack([o[i][0][1] for o in out]).cpu().detach()
+        zg = torch.stack([o[i][2] for o in out]).cpu().detach()
+        return yhat, s, zg
+
+    def predict(self, x:torch.Tensor, **kwargs) -> torch.Tensor:
+        out = [self.forward(x) for _ in range(self.n_samp)]
+        yhat1, s1, z1 = self._extract(out, 0)
+        yhat2, s2, z2 = self._extract(out, 1)
+        del out  # try to save memory
+        e1, a1 = self._calc_uncertainty(yhat1, s1)
+        e2, a2 = self._calc_uncertainty(yhat2, s2)
+        return torch.cat((torch.mean(yhat1, dim=0), e1, a1, torch.mean(z1, dim=0),
+                          torch.mean(yhat2, dim=0), e2, a2, torch.mean(z2, dim=0)), dim=1)
+
+    def freeze(self):
+        self.vae1.freeze()
+        self.vae2.freeze()
 
 class Burn2Net(BurnNet):
     """

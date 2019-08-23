@@ -18,7 +18,9 @@ __all__ = ['Burn2MSELoss',
            'HotMAEOnlyLoss',
            'HotMSEOnlyLoss',
            'LRSDecompLoss',
-           'OrdLoss']
+           'OrdLoss',
+           'Unburn2GaussianLoss',
+           'Unburn2LaplacianLoss']
 
 from typing import Tuple
 
@@ -136,7 +138,7 @@ class Burn2MSELoss(HotLoss):
         x1, x2, z1, z2, _, _ = out
         mse_loss1 = F.mse_loss(x1, y[:,0:1,...])
         mse_loss2 = F.mse_loss(x2, y[:,1:2,...])
-        z_penalty= F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
+        z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
         return mse_loss1 + mse_loss2 + self.beta * (z_penalty)
 
 
@@ -145,5 +147,29 @@ class Burn2MAELoss(HotLoss):
         x1, x2, z1, z2, _, _ = out
         mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
         mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
-        z_penalty= F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
+        z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
         return mae_loss1 + mae_loss2 + self.beta * (z_penalty)
+
+
+class Unburn2Loss(HotLoss):
+    def _loss(self, yhat, s, y):
+        raise NotImplementedError
+
+    def forward(self, out:torch.Tensor, y:torch.Tensor):
+        yhat1, s1 = out[0][0]
+        yhat2, s2 = out[1][0]
+        z1, z2 = out[0][1], out[1][1]
+        loss1 = self._loss(yhat1, s1, y[:,0:1,...])
+        loss2 = self._loss(yhat2, s2, y[:,1:2,...])
+        z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
+        return loss1 + loss2 + z_penalty
+
+
+class Unburn2GaussianLoss(Unburn2Loss):
+    def _loss(self, yhat, s, y):
+        return torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + self.beta * s))
+
+
+class Unburn2LaplacianLoss(Unburn2Loss):
+    def _loss(self, yhat, s, y):
+        return torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + self.beta * s)
