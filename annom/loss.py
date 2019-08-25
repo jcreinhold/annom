@@ -139,7 +139,7 @@ class Burn2MSELoss(HotLoss):
         mse_loss1 = F.mse_loss(x1, y[:,0:1,...])
         mse_loss2 = F.mse_loss(x2, y[:,1:2,...])
         z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
-        return mse_loss1 + mse_loss2 + self.beta * (z_penalty)
+        return mse_loss1 + mse_loss2 + self.beta * z_penalty
 
 
 class Burn2MAELoss(HotLoss):
@@ -148,7 +148,7 @@ class Burn2MAELoss(HotLoss):
         mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
         mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
         z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
-        return mae_loss1 + mae_loss2 + self.beta * (z_penalty)
+        return mae_loss1 + mae_loss2 + self.beta * z_penalty
 
 
 class Unburn2Loss(HotLoss):
@@ -162,7 +162,7 @@ class Unburn2Loss(HotLoss):
         loss1 = self._loss(yhat1, s1, y[:,0:1,...])
         loss2 = self._loss(yhat2, s2, y[:,1:2,...])
         z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
-        return loss1 + loss2 + z_penalty
+        return loss1 + loss2 + self.beta * z_penalty
 
 
 class Unburn2GaussianLoss(Unburn2Loss):
