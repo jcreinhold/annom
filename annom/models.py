@@ -15,6 +15,7 @@ __all__ = ['BurnNet',
            'Burn2NetP12',
            'Burn2NetP21',
            'HotNet',
+           'LavaNet',
            'LRSDNet',
            'OrdNet',
            'Unburn2Net',
@@ -271,6 +272,7 @@ class Unburn2Net(nn.Module):
         self.vae1.freeze()
         self.vae2.freeze()
 
+
 class Burn2Net(BurnNet):
     """
     defines a N-D (multinomial) variational U-Net for two inputs, outputs
@@ -341,3 +343,17 @@ class Burn2NetP21(Burn2Net):
 
     def predict(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return torch.cat(self.forward(x), dim=1)
+
+
+class LavaNet(BurnNet):
+    """
+    defines a N-D (multinomial) variational U-Net, like burnnet with small decoder
+    """
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None, **kwargs):
+        super().__init__(n_layers, latent_size, temperature, loss, **kwargs)
+        self.decoder = self.decoder._final(latent_size, self.decoder.n_output,
+                                           self.decoder.out_act, self.decoder.enable_bias)
+
+    def freeze(self):
+        self.encoder.freeze()
+        for p in self.encoder.finish.parameters(): p.requires_grad = False
