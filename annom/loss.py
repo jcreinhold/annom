@@ -167,9 +167,9 @@ class Unburn2Loss(HotLoss):
 
 class Unburn2GaussianLoss(Unburn2Loss):
     def _loss(self, yhat, s, y):
-        return torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + self.beta * s))
+        return torch.mean(0.5 * (torch.exp(-s) * F.mse_loss(yhat, y, reduction='none') + s))
 
 
 class Unburn2LaplacianLoss(Unburn2Loss):
     def _loss(self, yhat, s, y):
-        return torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + self.beta * s)
+        return torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + s)
