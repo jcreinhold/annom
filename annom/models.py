@@ -357,3 +357,99 @@ class LavaNet(BurnNet):
     def freeze(self):
         self.encoder.freeze()
         for p in self.encoder.finish.parameters(): p.requires_grad = False
+
+
+class Lava2Net(Burn2Net):
+    """
+    defines a N-D (multinomial) variational U-Net, like burn2net with small decoder
+    """
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None, **kwargs):
+        super().__init__(n_layers, latent_size, temperature, loss, **kwargs)
+        self.decoder1 = self.decoder1._final(latent_size, self.decoder1.n_output,
+                                             self.decoder1.out_act, self.decoder1.enable_bias)
+        self.decoder2 = self.decoder2._final(latent_size, self.decoder2.n_output,
+                                             self.decoder2.out_act, self.decoder2.enable_bias)
+
+    def freeze(self):
+        self.encoder.freeze()
+        for p in self.encoder.finish.parameters(): p.requires_grad = False
+
+
+class OCNet(Unet):
+    """
+    one-class classifier network
+    """
+    def __init__(self, n_layers:int, img_size:Tuple[int], loss:str=None, **kwargs):
+        super().__init__(n_layers, loss=loss, no_skip=True, **kwargs)
+        self.img_size = img_size
+        self.z_sz = self._z_size()
+        zs = np.asarray(self.z_sz)
+        nc = int(2 ** (self.channel_base_power + n_layers))
+        no = int(2 ** self.channel_base_power)
+        s = (2,2) if self.dim == 2 else (2,2,2)
+        clsf = [self._conv_act(nc, no, seq=False, stride=s)]
+        while np.all(zs > 1):
+            clsf.extend(self._conv_act(no, no, seq=False, stride=s))
+            zs //= 2
+        self.classifer = nn.Sequential(*clsf)
+        self.out = nn.Linear(np.prod(zs), 1)
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        x = F.interpolate(x, self.img_size, mode='bilinear' if self.dim == 2 else 'trilinear')
+        x, z = self._fwd_no_skip(x, **kwargs)
+        zpn = torch.cat((torch.randn_like(z)*0.1,z), dim=0)
+        c = self.out(torch.flatten(self.classifier(zpn), start_dim=1))
+        return x, c
+
+    def _z_size(self):
+        x = torch.randn(1,self.n_input,*self.img_size)
+        _, z = self._fwd_no_skip(x)
+        return z.shape[2:]
+
+    def _fwd_no_skip(self, x:torch.Tensor, **kwargs):
+        x, z = self._fwd_no_skip_nf(x)
+        x = self._finish(x)
+        return x, z
+
+    def _fwd_no_skip_nf(self, x:torch.Tensor):
+        sz = [x.shape]
+        if self.semi_3d: x = self._add_noise(self.init_conv(x))
+        for si in self.start: x = self._add_noise(si(x))
+        x = self._down(x, 0)
+        if self.all_conv: x = self._add_noise(x)
+        for i, dl in enumerate(self.down_layers, 1):
+            if self.resblock: xr = x
+            for dli in dl: x = self._add_noise(dli(x))
+            sz.append(x.shape)
+            x = self._down((x + xr) if self.resblock else x, i)
+            if self.all_conv: x = self._add_noise(x)
+        x = self._add_noise(self.bridge[0](x))
+        z = self.bridge[1](x)
+        x = self._up(self._add_noise(z), sz[-1][2:], 0)
+        if self.all_conv: x = self._add_noise(x)
+        for i, (ul, s) in enumerate(zip(self.up_layers, reversed(sz)), 1):
+            if self.attention is not None: x = self.attn[i-1](x)
+            if self.resblock: xr = x
+            for uli in ul: x = self._add_noise(uli(x))
+            x = self._up((x + xr) if self.resblock else x, sz[-i-1][2:], i)
+            if self.all_conv: x = self._add_noise(x)
+        if self.attention is not None: x = self.attn[-1](x)
+        if self.resblock: xr = x
+        for eli in self.end: x = self._add_noise(eli(x))
+        if self.resblock: x = x + xr
+        return x, z
+
+    def _grad_img(self, x):
+        self.zero_grad()
+        x= x.detach()
+        x.requires_grad = True
+        out = self.forward(x)
+        err = self.criterion(out, x)
+        err.backward()
+        grad = x.grad.detach()
+        self.zero_grad()
+        return torch.abs(grad.detach())
+
+    def predict(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        yhat = self.forward(x)
+        return

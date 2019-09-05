@@ -173,3 +173,27 @@ class Unburn2GaussianLoss(Unburn2Loss):
 class Unburn2LaplacianLoss(Unburn2Loss):
     def _loss(self, yhat, s, y):
         return torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + s)
+
+
+class OCLoss(HotLoss):
+    def _loss(self, yhat, y):
+        raise NotImplementedError
+
+    def forward(self, out, y):
+        yhat, c = out
+        nb = c.shape[0]
+        ct = torch.ones_like(c)
+        ct[0,...] = 0
+        recon_penalty = self._loss(yhat, y)
+        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=1/nb)
+        return bce + self.beta * recon_penalty
+
+
+class OCMSELoss(HotLoss):
+    def _loss(self, yhat, y):
+        return F.mse_loss(yhat, y)
+
+
+class OCMAELoss(HotLoss):
+    def _loss(self, yhat, y):
+        return F.l1_loss(yhat, y)
