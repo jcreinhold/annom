@@ -16,7 +16,9 @@ __all__ = ['BurnNet',
            'Burn2NetP21',
            'HotNet',
            'LavaNet',
+           'Lava2Net',
            'LRSDNet',
+           'OCNet',
            'OrdNet',
            'Unburn2Net',
            'UnburnNet']
@@ -363,46 +365,53 @@ class Lava2Net(Burn2Net):
     """
     defines a N-D (multinomial) variational U-Net, like burn2net with small decoder
     """
-    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, loss:str=None, **kwargs):
-        super().__init__(n_layers, latent_size, temperature, loss, **kwargs)
+    def __init__(self, n_layers:int, latent_size:int=5, temperature:float=0.67, beta:float=1., **kwargs):
+        super().__init__(n_layers, latent_size, temperature, beta, **kwargs)
         self.decoder1 = self.decoder1._final(latent_size, self.decoder1.n_output,
                                              self.decoder1.out_act, self.decoder1.enable_bias)
         self.decoder2 = self.decoder2._final(latent_size, self.decoder2.n_output,
                                              self.decoder2.out_act, self.decoder2.enable_bias)
 
     def freeze(self):
-        self.encoder.freeze()
-        for p in self.encoder.finish.parameters(): p.requires_grad = False
+        self.encoder1.freeze()
+        for p in self.encoder1.finish.parameters(): p.requires_grad = False
+        self.encoder2.freeze()
+        for p in self.encoder2.finish.parameters(): p.requires_grad = False
 
 
 class OCNet(Unet):
     """
     one-class classifier network
     """
-    def __init__(self, n_layers:int, img_size:Tuple[int], loss:str=None, **kwargs):
+    def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, beta:float=1., **kwargs):
+        _ = kwargs.pop('no_skip')
         super().__init__(n_layers, loss=loss, no_skip=True, **kwargs)
-        self.img_size = img_size
+        self.img_dim = img_dim
         self.z_sz = self._z_size()
-        zs = np.asarray(self.z_sz)
+        zs = np.asarray(self.z_sz) // 2
         nc = int(2 ** (self.channel_base_power + n_layers))
         no = int(2 ** self.channel_base_power)
         s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [self._conv_act(nc, no, seq=False, stride=s)]
-        while np.all(zs > 1):
+        clsf = [*self._conv_act(nc, no, seq=False, stride=s)]
+        while np.all(zs > 5):
             clsf.extend(self._conv_act(no, no, seq=False, stride=s))
             zs //= 2
-        self.classifer = nn.Sequential(*clsf)
-        self.out = nn.Linear(np.prod(zs), 1)
+        self.classifier = nn.Sequential(*clsf)
+        self.out = nn.Linear(np.prod(zs)*2, 1)
+        self.n_output += 1  # for grad image
+        self.laplacian = use_laplacian(loss)
+        self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
 
     def forward(self, x:torch.Tensor, **kwargs):
-        x = F.interpolate(x, self.img_size, mode='bilinear' if self.dim == 2 else 'trilinear')
+        x = F.interpolate(x, self.img_dim, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
         x, z = self._fwd_no_skip(x, **kwargs)
-        zpn = torch.cat((torch.randn_like(z)*0.1,z), dim=0)
-        c = self.out(torch.flatten(self.classifier(zpn), start_dim=1))
+        z = torch.cat((torch.randn_like(z[0:1,...])*0.1,z), dim=0)
+        c = torch.flatten(self.classifier(z), start_dim=1)
+        c = self.out(c)
         return x, c
 
     def _z_size(self):
-        x = torch.randn(1,self.n_input,*self.img_size)
+        x = torch.randn(1, self.n_input, *self.img_dim)
         _, z = self._fwd_no_skip(x)
         return z.shape[2:]
 
@@ -441,15 +450,18 @@ class OCNet(Unet):
 
     def _grad_img(self, x):
         self.zero_grad()
-        x= x.detach()
+        x = x.detach()
         x.requires_grad = True
-        out = self.forward(x)
-        err = self.criterion(out, x)
-        err.backward()
+        with torch.enable_grad():
+            out = self.forward(x)
+            err = self.criterion(out, x)
+            err.backward()
         grad = x.grad.detach()
         self.zero_grad()
-        return torch.abs(grad.detach())
+        return out, torch.abs(grad)
 
-    def predict(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        yhat = self.forward(x)
-        return
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        (yhat, c), grad = self._grad_img(x)
+        yhat = F.interpolate(yhat, x.shape[2:], mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
+        logger.info(f'Prediction: {list(torch.sigmoid(c).detach().cpu().numpy().squeeze()[1:])}')
+        return torch.cat((yhat, grad), dim=1)

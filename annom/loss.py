@@ -18,6 +18,8 @@ __all__ = ['Burn2MSELoss',
            'HotMAEOnlyLoss',
            'HotMSEOnlyLoss',
            'LRSDecompLoss',
+           'OCMAELoss',
+           'OCMSELoss',
            'OrdLoss',
            'Unburn2GaussianLoss',
            'Unburn2LaplacianLoss']
@@ -181,19 +183,21 @@ class OCLoss(HotLoss):
 
     def forward(self, out, y):
         yhat, c = out
+        ysz = yhat.shape[2:]
+        y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
         nb = c.shape[0]
         ct = torch.ones_like(c)
         ct[0,...] = 0
         recon_penalty = self._loss(yhat, y)
-        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=1/nb)
+        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=torch.tensor([1/nb]))
         return bce + self.beta * recon_penalty
 
 
-class OCMSELoss(HotLoss):
+class OCMSELoss(OCLoss):
     def _loss(self, yhat, y):
         return F.mse_loss(yhat, y)
 
 
-class OCMAELoss(HotLoss):
+class OCMAELoss(OCLoss):
     def _loss(self, yhat, y):
         return F.l1_loss(yhat, y)
