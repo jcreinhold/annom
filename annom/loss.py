@@ -189,7 +189,7 @@ class OCLoss(HotLoss):
         ct = torch.ones_like(c)
         ct[0,...] = 0
         recon_penalty = self._loss(yhat, y)
-        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=torch.tensor([1/nb]))
+        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=torch.tensor([1/nb]).to(y.device))
         return bce + self.beta * recon_penalty
 
 
