@@ -393,9 +393,9 @@ class OCNet(Unet):
         nc = int(2 ** (self.channel_base_power + n_layers))
         no = int(2 ** self.channel_base_power)
         s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [*self._conv_act(nc, no, seq=False, stride=s)]
+        clsf = [*self._conv_act(nc, no, norm='weight', seq=False, stride=s)]
         while np.all(zs > 9):
-            clsf.extend(self._conv_act(no, no, seq=False, stride=s))
+            clsf.extend(self._conv_act(no, no, norm='weight', seq=False, stride=s))
             zs //= 2
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
