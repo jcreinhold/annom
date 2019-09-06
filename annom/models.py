@@ -387,7 +387,8 @@ class OCNet(Unet):
         _ = kwargs.pop('no_skip')
         super().__init__(n_layers, loss=loss, no_skip=True, **kwargs)
         self.img_dim = img_dim
-        self.z_sz = self._z_size()
+        z = self._test_z()
+        self.z_sz = z.shape[2:]
         zs = np.asarray(self.z_sz) // 2
         nc = int(2 ** (self.channel_base_power + n_layers))
         no = int(2 ** self.channel_base_power)
@@ -397,7 +398,8 @@ class OCNet(Unet):
             clsf.extend(self._conv_act(no, no, seq=False, stride=s))
             zs //= 2
         self.classifier = nn.Sequential(*clsf)
-        self.out = nn.Linear(np.prod(zs)*2, 1)
+        self.o_sz = self._o_size(z)
+        self.out = nn.Linear(np.prod(self.o_sz), 1)
         self.n_output += 1  # for grad image
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
@@ -411,11 +413,16 @@ class OCNet(Unet):
         c = self.out(c)
         return x, c
 
-    def _z_size(self):
+    def _test_z(self):
         with torch.no_grad():
             x = torch.randn(1, self.n_input, *self.img_dim, dtype=torch.float32)
             z, _ = self._encode(x)
-        return z.shape[2:]
+        return z
+
+    def _o_size(self, z):
+        with torch.no_grad():
+            o = self.classifier(z)
+        return o.shape[1:]
 
     def _encode(self, x):
         sz = [x.shape]
