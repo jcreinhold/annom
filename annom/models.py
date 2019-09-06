@@ -404,23 +404,20 @@ class OCNet(Unet):
 
     def forward(self, x:torch.Tensor, **kwargs):
         x = F.interpolate(x, self.img_dim, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
-        x, z = self._fwd_no_skip(x, **kwargs)
+        z, sz = self._encode(x)
+        x = self._decode(z, sz)
         z = torch.cat((torch.randn_like(z[0:1,...])*0.1,z), dim=0)
         c = torch.flatten(self.classifier(z), start_dim=1)
         c = self.out(c)
         return x, c
 
     def _z_size(self):
-        x = torch.randn(1, self.n_input, *self.img_dim)
-        _, z = self._fwd_no_skip(x)
+        with torch.no_grad():
+            x = torch.randn(1, self.n_input, *self.img_dim, dtype=torch.float32)
+            z, _ = self._encode(x)
         return z.shape[2:]
 
-    def _fwd_no_skip(self, x:torch.Tensor, **kwargs):
-        x, z = self._fwd_no_skip_nf(x)
-        x = self._finish(x)
-        return x, z
-
-    def _fwd_no_skip_nf(self, x:torch.Tensor):
+    def _encode(self, x):
         sz = [x.shape]
         if self.semi_3d: x = self._add_noise(self.init_conv(x))
         for si in self.start: x = self._add_noise(si(x))
@@ -433,8 +430,11 @@ class OCNet(Unet):
             x = self._down((x + xr) if self.resblock else x, i)
             if self.all_conv: x = self._add_noise(x)
         x = self._add_noise(self.bridge[0](x))
-        z = self.bridge[1](x)
-        x = self._up(self._add_noise(z), sz[-1][2:], 0)
+        x = self.bridge[1](x)
+        return x, sz
+
+    def _decode(self, x, sz):
+        x = self._up(self._add_noise(x), sz[-1][2:], 0)
         if self.all_conv: x = self._add_noise(x)
         for i, (ul, s) in enumerate(zip(self.up_layers, reversed(sz)), 1):
             if self.attention is not None: x = self.attn[i-1](x)
@@ -446,7 +446,7 @@ class OCNet(Unet):
         if self.resblock: xr = x
         for eli in self.end: x = self._add_noise(eli(x))
         if self.resblock: x = x + xr
-        return x, z
+        return self._finish(x)
 
     def _grad_img(self, x):
         self.zero_grad()
