@@ -185,7 +185,7 @@ class OCLoss(HotLoss):
         yhat, c = out
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
-        nb = c.shape[0]
+        nb = c.shape[0] - 1
         ct = torch.ones_like(c)
         ct[0,...] = 0
         recon_penalty = self._loss(yhat, y)
