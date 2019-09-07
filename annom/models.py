@@ -400,7 +400,7 @@ class OCNet(Unet):
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
         self.out = nn.Linear(np.prod(self.o_sz), 2)
-        self.n_output = (self.n_output + 1) if not kwargs['color'] else (self.n_output * (4/3))  # for grad image
+        self.n_output = self.n_output + 1
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
         self.gradients = None
@@ -471,7 +471,7 @@ class OCNet(Unet):
         self.zero_grad()
         with torch.enable_grad():
             x, c = self.forward(x, add_oos=False, hook=True)
-            c[:,0].backward()
+            c[0,0].backward()
             reduce_dims = [0, 2, 3] if self.dim == 2 else [0, 2, 3, 4]
             pooled_gradients = torch.mean(self.gradients, dim=reduce_dims, keepdim=True)
             activations = self.get_activations(x).detach()
@@ -487,5 +487,6 @@ class OCNet(Unet):
         yhat, c, heatmap = self._gradcam(x)
         yhat = self._interp(yhat, x.shape[2:])
         heatmap = self._interp(heatmap, x.shape[2:])
-        logger.info(f'Prediction: {list(torch.argmax(c, dim=1).detach().cpu().squeeze())}')
+        pred = torch.argmax(c, dim=1)
+        logger.info(f'Prediction: {pred.detach().cpu().numpy().squeeze()}')
         return torch.cat((yhat, heatmap), dim=1)
