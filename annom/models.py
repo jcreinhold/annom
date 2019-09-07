@@ -394,22 +394,34 @@ class OCNet(Unet):
         no = int(2 ** self.channel_base_power)
         s = (2,2) if self.dim == 2 else (2,2,2)
         clsf = [*self._conv_act(nc, no, norm='weight', seq=False, stride=s)]
-        while np.all(zs > 9):
+        while np.all(zs > 24):
             clsf.extend(self._conv_act(no, no, norm='weight', seq=False, stride=s))
             zs //= 2
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
-        self.out = nn.Linear(np.prod(self.o_sz), 1)
-        self.n_output += 1  # for grad image
+        self.out = nn.Linear(np.prod(self.o_sz), 2)
+        self.n_output = (self.n_output + 1) if not kwargs['color'] else (self.n_output * (4/3))  # for grad image
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
+        self.gradients = None
 
-    def forward(self, x:torch.Tensor, **kwargs):
-        x = F.interpolate(x, self.img_dim, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
+    def activations_hook(self, grad):
+        self.gradients = grad
+
+    def get_activations(self, x):
+        x = self._interp(x, self.img_dim)
+        z, sz = self._encode(x)
+        c = self.classifier(z)
+        return c
+
+    def forward(self, x:torch.Tensor, add_oos:bool=True, hook:bool=False, **kwargs):
+        x = self._interp(x, self.img_dim)
         z, sz = self._encode(x)
         x = self._decode(z, sz)
-        z = torch.cat((torch.randn_like(z[0:1,...])*0.1,z), dim=0)
-        c = torch.flatten(self.classifier(z), start_dim=1)
+        if add_oos: z = torch.cat((torch.randn_like(z[0:1,...])*0.1,z), dim=0)
+        c = self.classifier(z)
+        if hook: h = c.register_hook(self.activations_hook)
+        c = torch.flatten(c, start_dim=1)
         c = self.out(c)
         return x, c
 
@@ -455,20 +467,25 @@ class OCNet(Unet):
         if self.resblock: x = x + xr
         return self._finish(x)
 
-    def _grad_img(self, x):
+    def _gradcam(self, x):
         self.zero_grad()
-        x = x.detach()
-        x.requires_grad = True
         with torch.enable_grad():
-            out = self.forward(x)
-            err = self.criterion(out, x)
-            err.backward()
-        grad = x.grad.detach()
-        self.zero_grad()
-        return out, torch.abs(grad)
+            x, c = self.forward(x, add_oos=False, hook=True)
+            c[:,0].backward()
+            reduce_dims = [0, 2, 3] if self.dim == 2 else [0, 2, 3, 4]
+            pooled_gradients = torch.mean(self.gradients, dim=reduce_dims, keepdim=True)
+            activations = self.get_activations(x).detach()
+            activations *= pooled_gradients
+            heatmap = torch.mean(activations, dim=1, keepdim=True)
+            F.relu_(heatmap).div_(heatmap.max())
+        return x, c, heatmap
+
+    def _interp(self, x, sz):
+        return F.interpolate(x, sz, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
 
     def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        (yhat, c), grad = self._grad_img(x)
-        yhat = F.interpolate(yhat, x.shape[2:], mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
-        logger.info(f'Prediction: {list(torch.sigmoid(c).detach().cpu().numpy().squeeze()[1:])}')
-        return torch.cat((yhat, grad), dim=1)
+        yhat, c, heatmap = self._gradcam(x)
+        yhat = self._interp(yhat, x.shape[2:])
+        heatmap = self._interp(heatmap, x.shape[2:])
+        logger.info(f'Prediction: {list(torch.argmax(c, dim=1).detach().cpu().squeeze())}')
+        return torch.cat((yhat, heatmap), dim=1)

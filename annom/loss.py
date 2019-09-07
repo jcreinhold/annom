@@ -186,10 +186,10 @@ class OCLoss(HotLoss):
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
         nb = c.shape[0] - 1
-        ct = torch.ones_like(c)
-        ct[0,...] = 0
+        ct = torch.ones(nb+1, dtype=torch.long, device=c.device)
+        ct[0] = 0
         recon_penalty = self._loss(yhat, y)
-        bce = F.binary_cross_entropy_with_logits(c, ct, pos_weight=torch.tensor([1/nb]).to(y.device))
+        bce = F.cross_entropy(c, ct, weight=torch.tensor([1, 1/nb]).to(y.device))
         return bce + self.beta * recon_penalty
 
 
