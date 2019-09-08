@@ -383,7 +383,7 @@ class OCNet(Unet):
     """
     one-class classifier network
     """
-    def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, beta:float=1., **kwargs):
+    def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, beta:float=1., temperature:float=0.01, **kwargs):
         _ = kwargs.pop('no_skip')
         super().__init__(n_layers, loss=loss, no_skip=True, **kwargs)
         self.img_dim = img_dim
@@ -403,6 +403,7 @@ class OCNet(Unet):
         self.n_output = self.n_output + 1
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
+        self.temperature = temperature
         self.gradients = None
 
     def activations_hook(self, grad):
@@ -418,7 +419,7 @@ class OCNet(Unet):
         x = self._interp(x, self.img_dim)
         z, sz = self._encode(x)
         x = self._decode(z, sz)
-        if add_oos: z = torch.cat((torch.randn_like(z[0:1,...])*0.1,z), dim=0)
+        if add_oos: z = torch.cat((torch.randn_like(z[0:1,...])*self.temperature,z), dim=0)
         c = self.classifier(z)
         if hook: h = c.register_hook(self.activations_hook)
         c = torch.flatten(c, start_dim=1)
