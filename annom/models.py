@@ -405,6 +405,7 @@ class OCNet(Unet):
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
         self.temperature = temperature
         self.gradients = None
+        self.bridge[1], self.bnl = self.bridge[1][0:3], self.bridge[1][3]
 
     def activations_hook(self, grad):
         self.gradients = grad
@@ -454,7 +455,7 @@ class OCNet(Unet):
         return x, sz
 
     def _decode(self, x, sz):
-        x = self._up(self._add_noise(x), sz[-1][2:], 0)
+        x = self._up(self._add_noise(self.bnl(x)), sz[-1][2:], 0)
         if self.all_conv: x = self._add_noise(x)
         for i, (ul, s) in enumerate(zip(self.up_layers, reversed(sz)), 1):
             if self.attention is not None: x = self.attn[i-1](x)
