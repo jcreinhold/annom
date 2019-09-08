@@ -419,7 +419,7 @@ class OCNet(Unet):
         x = self._interp(x, self.img_dim)
         z, sz = self._encode(x)
         x = self._decode(z, sz)
-        if add_oos: z = torch.cat((torch.randn_like(z[0:1,...])*self.temperature,z), dim=0)
+        if add_oos: z = torch.cat((torch.randn_like(z)*self.temperature,z), dim=0)
         c = self.classifier(z)
         if hook: h = c.register_hook(self.activations_hook)
         c = torch.flatten(c, start_dim=1)
