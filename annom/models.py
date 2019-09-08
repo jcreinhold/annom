@@ -478,7 +478,7 @@ class OCNet(Unet):
             activations = self.get_activations(x).detach()
             activations *= pooled_gradients
             heatmap = torch.mean(activations, dim=1, keepdim=True)
-            F.relu_(heatmap).div_(heatmap.max())
+            F.relu_(heatmap).div_(heatmap.max()+1e-6)
         return x, c, heatmap
 
     def _interp(self, x, sz):
