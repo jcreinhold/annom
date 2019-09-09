@@ -185,12 +185,13 @@ class OCLoss(HotLoss):
         yhat, c = out
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
-        nb = c.shape[0] // 2
-        ct = torch.ones(nb*2, dtype=torch.long, device=c.device)
-        ct[:nb] = 0
+        if self.beta >= 0:
+            nb = c.shape[0] // 2
+            ct = torch.ones(nb*2, dtype=torch.long, device=c.device)
+            ct[:nb] = 0
+            bce = F.cross_entropy(c, ct)
         recon_penalty = self._loss(yhat, y)
-        bce = F.cross_entropy(c, ct)
-        return bce + self.beta * recon_penalty
+        return (bce + self.beta * recon_penalty) if self.beta >= 0 else recon_penalty
 
 
 class OCMSELoss(OCLoss):

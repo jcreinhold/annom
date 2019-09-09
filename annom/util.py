@@ -15,7 +15,6 @@ __all__ = ['SelfAttentionWithMap',
 
 import torch
 from torch import nn
-import torch.nn.functional as F
 
 
 def use_laplacian(loss:str):
@@ -41,7 +40,7 @@ class SelfAttentionWithMap(nn.Module):
         x = x.view(*size[:2],-1)
         f, g, h = self.query(x), self.key(x), self.value(x)
         beta = torch.softmax(torch.bmm(f.permute(0,2,1).contiguous(), g), dim=1)
-        attn_map = torch.bmm(h, beta)
-        o = self.gamma * attn_map + x
-        return o.view(*size).contiguous(), attn_map.view(*size).contiguous()
+        o = self.gamma * torch.bmm(h, beta) + x
+        attn_map = torch.mean(beta, dim=2).unsqueeze(1).view(*size).contiguous()  # which pixels are attended to most
+        return o.view(*size).contiguous(), attn_map
 
