@@ -406,7 +406,7 @@ class OCNet(Unet):
             clsf.append(self._cl_conv(nci, 1, (1,1) if self.dim == 2 else (1,1,1)))
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
-        self.out = nn.Linear(np.prod(self.o_sz), 2)
+        self.out = nn.Linear(np.prod(self.o_sz), 2, bias=False)
         self.n_output = self.n_output + 1
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
@@ -421,8 +421,8 @@ class OCNet(Unet):
         self.bridge[1] = self.bridge[1][:2]
 
     def _cl_conv(self, in_c, out_c, s):
-        return nn.Conv3d(in_c, out_c, 3, bias=True, stride=s) if self.dim == 3 else \
-               nn.Conv2d(in_c, out_c, 3, bias=True, stride=s)
+        return nn.Conv3d(in_c, out_c, 3, bias=False, stride=s) if self.dim == 3 else \
+               nn.Conv2d(in_c, out_c, 3, bias=False, stride=s)
 
     def activations_hook(self, grad):
         self.gradients = grad
