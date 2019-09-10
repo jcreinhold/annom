@@ -392,15 +392,18 @@ class OCNet(Unet):
         self.z_sz = z.shape[2:]
         zs = np.asarray(self.z_sz) // 2
         nc = int(2 ** (self.channel_base_power + n_layers))
-        no = int(2 ** self.channel_base_power)
+        bc = int(2 ** self.channel_base_power)
+        nci = nc // 2
         s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [self._cl_conv(nc, no, s)]
-        fcn = 24 if attn is None else 40
+        clsf = [self._cl_conv(nc, nci, s)]
+        fcn = 36 if attn is None else 40
         while np.all(zs > fcn):
-            clsf.append(self._cl_conv(no, no, s))
+            nco = (nci // 2) if nci > bc else bc
+            clsf.append(self._cl_conv(nci, nco, s))
             zs //= 2
+            nci = (nci // 2) if nci > bc else bc
         if attn is not None:
-            clsf.append(self._cl_conv(no, 1, (1,1) if self.dim == 2 else (1,1,1)))
+            clsf.append(self._cl_conv(nci, 1, (1,1) if self.dim == 2 else (1,1,1)))
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
         self.out = nn.Linear(np.prod(self.o_sz), 2)
@@ -524,3 +527,12 @@ class OCNet(Unet):
         logger.info(f'Prediction: {pred.detach().cpu().numpy().squeeze()}')
         out = (yhat, heatmap) if self.attn is None else (yhat, heatmap, am)
         return torch.cat(out, dim=1)
+
+    def freeze(self):
+        """ freeze encoder """
+        for p in self.start.parameters(): p.requires_grad = False
+        for p in self.down_layers.parameters(): p.requires_grad = False
+        if self.all_conv:
+            for p in self.downsampconvs.parameters(): p.requires_grad = False
+        if self.semi_3d > 0:
+            for p in self.init_conv.parameters(): p.requires_grad = False
