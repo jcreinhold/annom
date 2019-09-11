@@ -439,10 +439,10 @@ class OCNet(Unet):
         x = self._interp(x, self.img_dim)
         z, sz = self._encode(x)
         x = self._decode(z, sz)
-        z = torch.cat((torch.randn_like(z)*self.temperature,z), dim=0)
         c = self.classifier(z)
         if self.attn is not None: c, am = self.attn(c)
         c = torch.flatten(c, start_dim=1)
+        c = torch.cat((torch.randn_like(c)*self.temperature,c), dim=0)
         c = self.out(c)
         return x, c
 
