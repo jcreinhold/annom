@@ -395,17 +395,15 @@ class OCNet(Unet):
         bc = int(2 ** self.channel_base_power)
         nci = nc // 2
         s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [nn.Sequential(nn.InstanceNorm2d(nc) if self.dim == 2 else nn.InstanceNorm3d(nc),
-                              nn.ReLU(),
-                              self._cl_conv(nc, nci, s))]
+        clsf = [*(self._conv_act(nc, nci, act=self.act, norm=self.norm, seq=False, stride=s)[1:])]
         fcn = 36 if attn is None else 40
         while np.all(zs > fcn):
             nco = (nci // 2) if nci > bc else bc
-            clsf.append(self._cl_conv(nci, nco, s))
+            clsf.extend(self._conv_act(nci, nco, act=self.act, norm=self.norm, seq=False, stride=s)[1:])
             zs //= 2
             nci = (nci // 2) if nci > bc else bc
         if attn is not None:
-            clsf.append(self._cl_conv(nci, 1, (1,1) if self.dim == 2 else (1,1,1)))
+            clsf.extend(self._conv_act(nci, 1, act=self.act, norm=self.norm, seq=False))
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
         self.out = nn.Linear(np.prod(self.o_sz), 2)
@@ -421,10 +419,6 @@ class OCNet(Unet):
         else: self.attn = None
         self.bridge.append(self.bridge[1][2:])
         self.bridge[1] = self.bridge[1][:2]
-
-    def _cl_conv(self, in_c, out_c, s):
-        return nn.Conv3d(in_c, out_c, 3, bias=False, stride=s) if self.dim == 3 else \
-               nn.Conv2d(in_c, out_c, 3, bias=False, stride=s)
 
     def activations_hook(self, grad):
         self.gradients = grad
