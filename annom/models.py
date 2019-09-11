@@ -408,7 +408,7 @@ class OCNet(Unet):
             clsf.append(self._cl_conv(nci, 1, (1,1) if self.dim == 2 else (1,1,1)))
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
-        self.out = nn.Linear(np.prod(self.o_sz), 2, bias=False)
+        self.out = nn.Linear(np.prod(self.o_sz), 2)
         self.n_output = self.n_output + 1
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
