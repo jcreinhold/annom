@@ -395,7 +395,9 @@ class OCNet(Unet):
         bc = int(2 ** self.channel_base_power)
         nci = nc // 2
         s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [self._cl_conv(nc, nci, s)]
+        clsf = [nn.Sequential(nn.InstanceNorm2d(nc) if self.dim == 2 else nn.InstanceNorm3d(nc),
+                              nn.ReLU(),
+                              self._cl_conv(nc, nci, s))]
         fcn = 36 if attn is None else 40
         while np.all(zs > fcn):
             nco = (nci // 2) if nci > bc else bc
