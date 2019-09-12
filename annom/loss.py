@@ -24,12 +24,15 @@ __all__ = ['Burn2MSELoss',
            'Unburn2GaussianLoss',
            'Unburn2LaplacianLoss']
 
+import logging
 from typing import Tuple
 
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+logger = logging.getLogger(__name__)
 
 
 class LRSDecompLoss(nn.Module):
@@ -185,14 +188,17 @@ class OCLoss(HotLoss):
         yhat, c, ctv = out
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
+        rp = self._loss(yhat, y)
         if self.beta >= 0:
             nb = c.shape[0] // 2
             ct = torch.ones(nb*2, dtype=torch.long, device=c.device)
             ct[:nb] = 0
             bce = F.cross_entropy(c, ct)
-            ctvc = torch.mean(F.pdist(ctv))
-        recon_penalty = self._loss(yhat, y)
-        return (bce + self.beta*recon_penalty + (self.beta/10)*ctvc) if self.beta >= 0 else recon_penalty
+            pd = torch.mean(F.pdist(ctv))
+            accuracy = torch.mean((torch.argmax(c,dim=1)==ct).float())
+            logger.info(f'CE: {bce.item():.2e}, PD: {pd.item():.2e}, '
+                        f'RP: {rp.item():.2e}, Acc: {accuracy.item():.5f}')
+        return (bce + self.beta * (pd + rp)) if self.beta >= 0 else rp
 
 
 class OCMSELoss(OCLoss):
