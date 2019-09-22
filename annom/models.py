@@ -33,6 +33,7 @@ import torch.nn.functional as F
 
 from synthtorch import Unet
 from .errors import *
+from .layers import *
 from .loss import *
 from .util import *
 
