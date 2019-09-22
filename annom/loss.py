@@ -238,7 +238,9 @@ class SVDDLoss(nn.Module):
             c = torch.ones_like(phi) * self.c
             yi = torch.ones(nb*2, dtype=phi.dtype, device=phi.device)
             yi[:nb] = -1
-            svdd = torch.mean(torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1) ** yi)
+            z = torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1)
+            z[:nb] += 1e-6
+            svdd = torch.mean(z ** yi)
             logger.info(f'SVDD: {svdd.item():.2e}, RP: {rp.item():.2e}')
         return (svdd + self.beta * rp) if self.beta >= 0 else rp
 

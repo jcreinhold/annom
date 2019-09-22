@@ -554,7 +554,7 @@ class OCNet2(OCNet):
         nb = x.size(0)
         x = self._interp(x, self.img_dim)
         with torch.no_grad():
-            xa = torch.stack([self.block(xi) for xi in x.clone()], dim=0)
+            xa = torch.stack([self.block(xi) for xi in x.cpu().detach()], dim=0).to(x.device)
             x = torch.cat((xa, x), dim=0)
         z, sz = self._encode(x)
         x = self._decode(z[nb:], sz)
