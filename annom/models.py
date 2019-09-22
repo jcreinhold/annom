@@ -19,6 +19,7 @@ __all__ = ['BurnNet',
            'Lava2Net',
            'LRSDNet',
            'OCNet',
+           'OCNet2',
            'OrdNet',
            'Unburn2Net',
            'UnburnNet']
@@ -387,8 +388,22 @@ class OCNet(Unet):
     def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, beta:float=1., temperature:float=0.01, **kwargs):
         _ = kwargs.pop('no_skip')
         attn = kwargs.pop('attention')
+        kwargs['affine'] = False
         super().__init__(n_layers, loss=loss, no_skip=True, attention=None, **kwargs)
         self.img_dim = img_dim
+        self._create_clsf(n_layers, attn)
+        self.n_output = self.n_output + 1
+        self.laplacian = use_laplacian(loss)
+        self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
+        self.temperature = temperature
+        self.gradients = None
+        if attn == 'channel': logger.warning('OCNet only supports spatial attention.')
+        if attn is not None:
+            self.attn = SelfAttentionWithMap(1)
+            self.n_output += 1
+        else: self.attn = None
+
+    def _create_clsf(self, n_layers, attn):
         z = self._test_z()
         self.z_sz = z.shape[2:]
         zs = np.asarray(self.z_sz) // 2
@@ -408,18 +423,6 @@ class OCNet(Unet):
         self.classifier = nn.Sequential(*clsf)
         self.o_sz = self._o_size(z)
         self.out = nn.Linear(np.prod(self.o_sz), 2)
-        self.n_output = self.n_output + 1
-        self.laplacian = use_laplacian(loss)
-        self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
-        self.temperature = temperature
-        self.gradients = None
-        if attn == 'channel': logger.warning('OCNet only supports spatial attention.')
-        if attn is not None:
-            self.attn = SelfAttentionWithMap(1)
-            self.n_output += 1
-        else: self.attn = None
-        self.bridge.append(self.bridge[1][2:])
-        self.bridge[1] = self.bridge[1][:2]
 
     def activations_hook(self, grad):
         self.gradients = grad
@@ -469,7 +472,7 @@ class OCNet(Unet):
         return x, sz
 
     def _decode(self, x, sz):
-        x = self._up(self._add_noise(self.bridge[2](x)), sz[-1][2:], 0)
+        x = self._up(self._add_noise(x), sz[-1][2:], 0)
         if self.all_conv: x = self._add_noise(x)
         for i, (ul, s) in enumerate(zip(self.up_layers, reversed(sz)), 1):
             if self.resblock: xr = x
@@ -533,3 +536,58 @@ class OCNet(Unet):
             for p in self.downsampconvs.parameters(): p.requires_grad = False
         if self.semi_3d > 0:
             for p in self.init_conv.parameters(): p.requires_grad = False
+
+
+class OCNet2(OCNet):
+
+    def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None, beta:float=1., **kwargs):
+        super().__init__(n_layers, img_dim, loss, beta, **kwargs)
+        id = np.asarray(img_dim)
+        sz_range = list(zip(np.around(0.1*id),np.around(0.2*id)))
+        self.block = RandomBlock(sz_range, thresh=0, int_range=None, is_3d=self.dim == 3)
+        self.latent_size = latent_size
+        self.out = nn.Linear(np.prod(self.o_sz), latent_size, bias=False)
+        self.criterion = SVDDMAELoss(latent_size, beta) if self.laplacian else SVDDMSELoss(latent_size, beta)
+        del self.attn
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        nb = x.size(0)
+        x = self._interp(x, self.img_dim)
+        with torch.no_grad():
+            xa = torch.stack([self.block(xi) for xi in x.clone()], dim=0)
+            x = torch.cat((xa, x), dim=0)
+        z, sz = self._encode(x)
+        x = self._decode(z[nb:], sz)
+        phi = self.classifier(z)
+        phi = phi.flatten(start_dim=1)
+        phi = self.out(phi)
+        return x, phi
+
+    def _fwd_predict(self, x):
+        x = self._interp(x, self.img_dim)
+        z, sz = self._encode(x)
+        x = self._decode(z, sz)
+        phi = self.classifier(z)
+        phi = phi.flatten(start_dim=1)
+        phi = self.out(phi)
+        return x, phi
+
+    def _grad_img(self, x):
+        self.zero_grad()
+        self.criterion.beta = 0  # only backprop on dist to c
+        x = x.detach()
+        x.requires_grad = True
+        with torch.enable_grad():
+            out = self._fwd_predict(x)
+            err = self.criterion(out, x)
+            err.backward()
+        grad = x.grad.detach()
+        self.zero_grad()
+        return out, torch.mean(torch.abs(grad), dim=1, keepdim=True)
+
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        (yhat, phi), grad = self._grad_img(x)
+        yhat = self._interp(yhat, x.shape[2:])
+        dist = F.mse_loss(phi, torch.ones_like(phi)*self.criterion.c)
+        logger.info(f'Anomaly score: {dist.item():.3e}')
+        return torch.cat((yhat, grad), dim=1)

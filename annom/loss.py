@@ -21,6 +21,8 @@ __all__ = ['Burn2MSELoss',
            'OCMAELoss',
            'OCMSELoss',
            'OrdLoss',
+           'SVDDMAELoss',
+           'SVDDMSELoss',
            'Unburn2GaussianLoss',
            'Unburn2LaplacianLoss']
 
@@ -207,5 +209,46 @@ class OCMSELoss(OCLoss):
 
 
 class OCMAELoss(OCLoss):
+    def _loss(self, yhat, y):
+        return F.l1_loss(yhat, y)
+
+
+class SVDDLoss(nn.Module):
+    def __init__(self, sz, beta:float=1.):
+        super().__init__()
+        self.beta = beta
+        self.register_buffer('c', torch.ones(1, sz, dtype=torch.float32))
+        self.register_buffer('is_c_set', torch.zeros(1, dtype=torch.uint8))
+
+    def _loss(self, yhat, y):
+        raise NotImplementedError
+
+    def forward(self, out, y):
+        yhat, phi = out
+        ysz = yhat.shape[2:]
+        y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
+        rp = self._loss(yhat, y)
+        if self.beta >= 0:
+            nb = phi.shape[0] // 2
+            if torch.sum(self.is_c_set) == 0:
+                with torch.no_grad():
+                    self.c *= torch.mean(phi[nb:], dim=0, keepdim=True)
+                    self.is_c_set += 1
+                    logger.info('Set c in SVDD loss.')
+            c = torch.ones_like(phi) * self.c
+            yi = torch.ones(nb*2, dtype=phi.dtype, device=phi.device)
+            yi[:nb] = -1
+            svdd = torch.mean(torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1) ** yi)
+            logger.info(f'SVDD: {svdd.item():.2e}, RP: {rp.item():.2e}')
+        return (svdd + self.beta * rp) if self.beta >= 0 else rp
+
+    def extra_repr(self): return f'beta={self.beta}, c={self.c}'
+
+class SVDDMSELoss(SVDDLoss):
+    def _loss(self, yhat, y):
+        return F.mse_loss(yhat, y)
+
+
+class SVDDMAELoss(SVDDLoss):
     def _loss(self, yhat, y):
         return F.l1_loss(yhat, y)
