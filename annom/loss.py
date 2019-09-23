@@ -246,6 +246,7 @@ class SVDDLoss(nn.Module):
 
     def extra_repr(self): return f'beta={self.beta}, c={self.c}'
 
+
 class SVDDMSELoss(SVDDLoss):
     def _loss(self, yhat, y):
         return F.mse_loss(yhat, y)

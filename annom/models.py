@@ -574,12 +574,11 @@ class OCNet2(OCNet):
 
     def _grad_img(self, x):
         self.zero_grad()
-        self.criterion.beta = 0  # only backprop on dist to c
         x = x.detach()
         x.requires_grad = True
         with torch.enable_grad():
             out = self._fwd_predict(x)
-            err = self.criterion(out, x)
+            err = F.mse_loss(out[1], self.criterion.c * torch.ones_like(out[1]))
             err.backward()
         grad = x.grad.detach()
         self.zero_grad()
