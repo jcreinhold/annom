@@ -239,12 +239,14 @@ class SVDDLoss(nn.Module):
             yi = torch.ones(nb*2, dtype=phi.dtype, device=phi.device)
             yi[:nb] = -1
             z = torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1)
-            z[:nb] += 1e-6
-            svdd = torch.mean(z ** yi)
+            z[:nb] += 1e-6  # avoid division by zero
+            z = z ** yi
+            z[:nb] *= 0.5  # weight the fake anomalies less
+            svdd = torch.mean(z)
             logger.info(f'SVDD: {svdd.item():.2e}, RP: {rp.item():.2e}')
         return (svdd + self.beta * rp) if self.beta >= 0 else rp
 
-    def extra_repr(self): return f'beta={self.beta}, c={self.c}'
+    def extra_repr(self): return f'beta={self.beta}'
 
 
 class SVDDMSELoss(SVDDLoss):
