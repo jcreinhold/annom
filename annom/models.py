@@ -403,7 +403,7 @@ class OCNet(Unet):
             self.n_output += 1
         else: self.attn = None
 
-    def _create_clsf(self, n_layers, attn):
+    def _create_clsf(self, n_layers, attn, fcn=20):
         z = self._test_z()
         self.z_sz = z.shape[2:]
         zs = np.asarray(self.z_sz) // 2
@@ -412,8 +412,7 @@ class OCNet(Unet):
         nci = nc // 2
         s = (2,2) if self.dim == 2 else (2,2,2)
         clsf = [*(self._conv_act(nc, nci, act=self.act, norm=self.norm, seq=False, stride=s)[1:])]
-        fcn = 36 if attn is None else 40
-        while np.all(zs > fcn):
+        while np.all(zs >= fcn):
             nco = (nci // 2) if nci > bc else bc
             clsf.extend(self._conv_act(nci, nco, act=self.act, norm=self.norm, seq=False, stride=s)[1:])
             zs //= 2
