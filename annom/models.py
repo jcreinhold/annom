@@ -15,10 +15,11 @@ __all__ = ['BurnNet',
            'Burn2NetP12',
            'Burn2NetP21',
            'HotNet',
+           'LAutoNet',
            'LavaNet',
            'Lava2Net',
            'LRSDNet',
-           'OCNet',
+           'OCNet1',
            'OCNet2',
            'OrdNet',
            'Unburn2Net',
@@ -381,78 +382,46 @@ class Lava2Net(Burn2Net):
         for p in self.encoder2.finish.parameters(): p.requires_grad = False
 
 
-class OCNet(Unet):
-    """
-    one-class classifier network
-    """
-    def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, beta:float=1., temperature:float=0.01, **kwargs):
-        _ = kwargs.pop('no_skip')
-        attn = kwargs.pop('attention')
+class LAutoNet(Unet):
+    """ use a 1-d vector as latent space in this network """
+    def __init__(self, n_layers:int, img_dim:Tuple[int], loss:str=None, latent_size:int=128, **kwargs):
         kwargs['affine'] = False
-        super().__init__(n_layers, loss=loss, no_skip=True, attention=None, **kwargs)
+        kwargs['enable_bias'] = False
+        kwargs['input_connect'] = False
+        kwargs['no_skip'] = True
+        super().__init__(n_layers, loss=loss, **kwargs)
         self.img_dim = img_dim
-        self._create_clsf(n_layers, attn)
-        self.n_output = self.n_output + 1
         self.laplacian = use_laplacian(loss)
-        self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
-        self.temperature = temperature
-        self.gradients = None
-        if attn == 'channel': logger.warning('OCNet only supports spatial attention.')
-        if attn is not None:
-            self.attn = SelfAttentionWithMap(1)
-            self.n_output += 1
-        else: self.attn = None
+        self.criterion = HotMAEOnlyLoss() if self.laplacian else HotMSEOnlyLoss()
 
-    def _create_clsf(self, n_layers, attn, fcn=20):
-        z = self._test_z()
-        self.z_sz = z.shape[2:]
-        zs = np.asarray(self.z_sz) // 2
-        nc = int(2 ** (self.channel_base_power + n_layers))
-        bc = int(2 ** self.channel_base_power)
-        nci = nc // 2
-        s = (2,2) if self.dim == 2 else (2,2,2)
-        clsf = [*(self._conv_act(nc, nci, act=self.act, norm=self.norm, seq=False, stride=s)[1:])]
-        while np.all(zs >= fcn):
-            nco = (nci // 2) if nci > bc else bc
-            clsf.extend(self._conv_act(nci, nco, act=self.act, norm=self.norm, seq=False, stride=s)[1:])
-            zs //= 2
-            nci = (nci // 2) if nci > bc else bc
-        if attn is not None:
-            clsf.extend(self._conv_act(nci, 1, act=self.act, norm=self.norm, seq=False))
-        self.classifier = nn.Sequential(*clsf)
-        self.o_sz = self._o_size(z)
-        self.out = nn.Linear(np.prod(self.o_sz), 2)
-
-    def activations_hook(self, grad):
-        self.gradients = grad
-
-    def get_activations(self, x):
-        x = self._interp(x, self.img_dim)
-        z, sz = self._encode(x)
-        c = self.classifier(z)
-        return c
-
-    def forward(self, x:torch.Tensor, **kwargs):
-        x = self._interp(x, self.img_dim)
-        z, sz = self._encode(x)
-        x = self._decode(z, sz)
-        ct = self.classifier(z)
-        if self.attn is not None: ct, am = self.attn(ct)
-        ct = torch.flatten(ct, start_dim=1)
-        c = torch.cat((torch.randn_like(ct)*self.temperature,ct), dim=0)
-        c = self.out(c)
-        return x, c, ct
-
-    def _test_z(self):
+        # handle creating new bridge (to 1-d latent space vector)
+        del self.bridge
+        self.latent_size = latent_size
         with torch.no_grad():
-            x = torch.randn(1, self.n_input, *self.img_dim, dtype=torch.float32)
-            z, _ = self._encode(x)
-        return z
+            img_dim_z = self._encode(torch.zeros((1, self.n_input, *img_dim), dtype=torch.float32))[0].shape
+        self.fsz = img_dim_z[1:]
+        self.esz = int(np.prod(self.fsz))
+        logger.debug(f'Size after Conv = {self.fsz}; Encoding size = {self.esz}')
 
-    def _o_size(self, z):
-        with torch.no_grad():
-            o = self.classifier(z)
-        return o.shape[1:]
+        # Latent vector
+        self.latent_fc = nn.Sequential(
+            nn.Linear(self.esz, latent_size),
+            nn.BatchNorm1d(latent_size, affine=False),
+            nn.ReLU(),
+            nn.Linear(latent_size, latent_size))
+
+        # Back to conv
+        self.decode_fc = nn.Sequential(
+            nn.Linear(latent_size, latent_size),
+            nn.BatchNorm1d(latent_size, affine=False),
+            nn.ReLU(),
+            nn.Linear(latent_size, self.esz),
+            nn.BatchNorm1d(self.esz, affine=False),
+            nn.ReLU())
+
+        # replace first upsampconv to not reduce channels
+        nc = int(2 ** (self.channel_base_power + n_layers - 1))
+        if not self.all_conv: self.upsampconvs[0] = self._upsampconv(nc, nc)
 
     def _encode(self, x):
         sz = [x.shape]
@@ -466,14 +435,13 @@ class OCNet(Unet):
             sz.append(x.shape)
             x = self._down((x + xr) if self.resblock else x, i)
             if self.all_conv: x = self._add_noise(x)
-        x = self._add_noise(self.bridge[0](x))
-        x = self.bridge[1](x)
         return x, sz
 
-    def _decode(self, x, sz):
+    def _decode(self, z, sz):
+        x = self.decode_fc(z).view(z.size(0), *self.fsz)
         x = self._up(self._add_noise(x), sz[-1][2:], 0)
         if self.all_conv: x = self._add_noise(x)
-        for i, (ul, s) in enumerate(zip(self.up_layers, reversed(sz)), 1):
+        for i, ul in enumerate(self.up_layers, 1):
             if self.resblock: xr = x
             for uli in ul: x = self._add_noise(uli(x))
             x = self._up((x + xr) if self.resblock else x, sz[-i-1][2:], i)
@@ -483,49 +451,15 @@ class OCNet(Unet):
         if self.resblock: x = x + xr
         return self._finish(x)
 
-    def _fwd_predict(self, x:torch.Tensor):
+    def forward(self, x, **kwargs):
         x = self._interp(x, self.img_dim)
-        z, sz = self._encode(x)
-        x = self._decode(z, sz)
-        c = self.classifier(z)
-        if self.attn is not None: c, am = self.attn(c)
-        h = c.register_hook(self.activations_hook)
-        c = torch.flatten(c, start_dim=1)
-        c = self.out(c)
-        return (x, c) if self.attn is None else (x, c, am)
+        x, sz = self._encode(x)
+        z = self.latent_fc(x.view(x.size(0), self.esz))
+        return self._decode(z, sz), z
 
-    def _gradcam(self, x):
-        self.zero_grad()
-        with torch.enable_grad():
-            if self.attn is None:
-                x, c = self._fwd_predict(x)
-            else:
-                x, c, am = self._fwd_predict(x)
-            c[0,0].backward()
-            reduce_dims = [0, 2, 3] if self.dim == 2 else [0, 2, 3, 4]
-            pooled_gradients = torch.mean(self.gradients, dim=reduce_dims, keepdim=True)
-            activations = self.get_activations(x).detach()
-            activations *= pooled_gradients
-            heatmap = torch.mean(activations, dim=1, keepdim=True)
-            F.relu_(heatmap).div_(heatmap.max()+1e-6)
-        return (x, c, heatmap) if self.attn is None else (x, c, heatmap, am)
-
-    def _interp(self, x, sz):
-        return F.interpolate(x, sz, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
-
-    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        if self.attn is None:
-            yhat, c, heatmap = self._gradcam(x)
-        else:
-            yhat, c, heatmap, am = self._gradcam(x)
-        yhat = self._interp(yhat, x.shape[2:])
-        heatmap = self._interp(heatmap, x.shape[2:])
-        if self.attn is not None:
-            am = self._interp(am, x.shape[2:])
-        pred = torch.argmax(c, dim=1)
-        logger.info(f'Prediction: {pred.detach().cpu().numpy().squeeze()}')
-        out = (yhat, heatmap) if self.attn is None else (yhat, heatmap, am)
-        return torch.cat(out, dim=1)
+    def predict(self, x, *args, **kwargs):
+        """ predict from a sample `x` """
+        return self._interp(self.forward(x)[0], x.shape[2:])
 
     def freeze(self):
         """ freeze encoder """
@@ -536,18 +470,83 @@ class OCNet(Unet):
         if self.semi_3d > 0:
             for p in self.init_conv.parameters(): p.requires_grad = False
 
+    def _interp(self, x, sz):
+        if x.shape[2:] != sz:
+            x = F.interpolate(x, sz, mode='bilinear' if self.dim == 2 else 'trilinear', align_corners=True)
+        return x
 
-class OCNet2(OCNet):
+
+class OCNet1(LAutoNet):
+    """
+    one-class classifier network
+    """
+    def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None,
+                 beta:float=1., temperature:float=0.01, **kwargs):
+        super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
+        self.classifier = nn.Linear(latent_size, 2)
+        self.n_output = self.n_output + 1  # account for gradcam image
+        self.laplacian = use_laplacian(loss)
+        self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
+        self.temperature = temperature
+        self.gradients = None
+
+    def activations_hook(self, grad):
+        self.gradients = grad
+
+    def get_activations(self, x):
+        x = self._interp(x, self.img_dim)
+        x, _ = self._encode(x)
+        return x
+
+    def forward(self, x:torch.Tensor, **kwargs):
+        x = self._interp(x, self.img_dim)
+        x, sz = self._encode(x)
+        z = self.latent_fc(x.view(x.size(0), self.esz))
+        x = self._decode(z, sz)
+        zf = torch.cat((torch.randn_like(z)*self.temperature,z), dim=0)  # create fake (oos) data at the origin
+        c = self.classifier(zf)
+        return x, z, c
+
+    def _fwd_predict(self, x:torch.Tensor):
+        x = self._interp(x, self.img_dim)
+        x, sz = self._encode(x)
+        h = x.register_hook(self.activations_hook)
+        z = self.latent_fc(x.view(x.size(0), self.esz))
+        c = self.classifier(z)
+        x = self._decode(z, sz)
+        return x, c
+
+    def _gradcam(self, x):
+        self.zero_grad()
+        with torch.enable_grad():
+            x, c = self._fwd_predict(x)
+            c[0,0].backward()
+            reduce_dims = [0, 2, 3] if self.dim == 2 else [0, 2, 3, 4]
+            pooled_gradients = torch.mean(self.gradients, dim=reduce_dims, keepdim=True)
+            activations = self.get_activations(x).detach()
+            activations *= pooled_gradients
+            heatmap = torch.mean(activations, dim=1, keepdim=True)
+            F.relu_(heatmap).div_(heatmap.max()+1e-6)
+        return x, c, heatmap
+
+    def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        yhat, c, heatmap = self._gradcam(x)
+        yhat = self._interp(yhat, x.shape[2:])
+        heatmap = self._interp(heatmap, x.shape[2:])
+        pred = torch.argmax(c, dim=1)
+        logger.info(f'Prediction: {pred.detach().cpu().numpy().squeeze()}')
+        return torch.cat((yhat, heatmap), dim=1)
+
+
+class OCNet2(LAutoNet):
 
     def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None, beta:float=1., **kwargs):
-        super().__init__(n_layers, img_dim, loss, beta, **kwargs)
+        super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
+        self.n_output = self.n_output + 1  # account for grad image
         id = np.asarray(img_dim)
         sz_range = list(zip(np.around(0.1*id),np.around(0.2*id)))
         self.block = RandomBlock(sz_range, thresh=0, int_range=None, is_3d=self.dim == 3)
-        self.latent_size = latent_size
-        self.out = nn.Linear(np.prod(self.o_sz), latent_size, bias=False)
         self.criterion = SVDDMAELoss(latent_size, beta) if self.laplacian else SVDDMSELoss(latent_size, beta)
-        del self.attn
 
     def forward(self, x:torch.Tensor, **kwargs):
         nb = x.size(0)
@@ -555,21 +554,16 @@ class OCNet2(OCNet):
         with torch.no_grad():
             xa = torch.stack([self.block(xi) for xi in x.cpu().detach()], dim=0).to(x.device)
             x = torch.cat((xa, x), dim=0)
-        z, sz = self._encode(x)
-        x = self._decode(z[nb:], sz)
-        phi = self.classifier(z)
-        phi = phi.flatten(start_dim=1)
-        phi = self.out(phi)
-        return x, phi
+        x, sz = self._encode(x)
+        z = self.latent_fc(x.view(x.size(0), self.esz))
+        return self._decode(z[nb:], sz), z
 
     def _fwd_predict(self, x):
         x = self._interp(x, self.img_dim)
-        z, sz = self._encode(x)
+        x, sz = self._encode(x)
+        z = self.latent_fc(x.view(x.size(0), self.esz))
         x = self._decode(z, sz)
-        phi = self.classifier(z)
-        phi = phi.flatten(start_dim=1)
-        phi = self.out(phi)
-        return x, phi
+        return x, z
 
     def _grad_img(self, x):
         self.zero_grad()
@@ -580,12 +574,11 @@ class OCNet2(OCNet):
             err = F.mse_loss(out[1], self.criterion.c * torch.ones_like(out[1]))
             err.backward()
         grad = x.grad.detach()
-        self.zero_grad()
         return out, torch.mean(torch.abs(grad), dim=1, keepdim=True)
 
     def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        (yhat, phi), grad = self._grad_img(x)
+        (yhat, z), grad = self._grad_img(x)
         yhat = self._interp(yhat, x.shape[2:])
-        dist = F.mse_loss(phi, torch.ones_like(phi)*self.criterion.c)
+        dist = F.mse_loss(z, torch.ones_like(z)*self.criterion.c)
         logger.info(f'Anomaly score: {dist.item():.3e}')
         return torch.cat((yhat, grad), dim=1)

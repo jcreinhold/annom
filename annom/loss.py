@@ -187,7 +187,7 @@ class OCLoss(HotLoss):
         raise NotImplementedError
 
     def forward(self, out, y):
-        yhat, c, ctv = out
+        yhat, z, c = out
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
         rp = self._loss(yhat, y)
@@ -196,11 +196,9 @@ class OCLoss(HotLoss):
             ct = torch.ones(nb*2, dtype=torch.long, device=c.device)
             ct[:nb] = 0
             bce = F.cross_entropy(c, ct)
-            pd = torch.mean(F.pdist(ctv))
             accuracy = torch.mean((torch.argmax(c,dim=1)==ct).float())
-            logger.info(f'CE: {bce.item():.2e}, PD: {pd.item():.2e}, '
-                        f'RP: {rp.item():.2e}, Acc: {accuracy.item():.5f}')
-        return (bce + self.beta * (pd + rp)) if self.beta >= 0 else rp
+            logger.info(f'CE: {bce.item():.2e}, RP: {rp.item():.2e}, Acc: {accuracy.item():.5f}')
+        return (bce + self.beta * rp) if self.beta >= 0 else rp
 
 
 class OCMSELoss(OCLoss):
