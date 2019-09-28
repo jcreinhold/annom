@@ -405,17 +405,17 @@ class LAutoNet(Unet):
 
         # Latent vector
         self.latent_fc = nn.Sequential(
-            nn.Linear(self.esz, latent_size),
+            nn.Linear(self.esz, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
             nn.ReLU(),
-            nn.Linear(latent_size, latent_size))
+            nn.Linear(latent_size, latent_size, bias=False))
 
         # Back to conv
         self.decode_fc = nn.Sequential(
-            nn.Linear(latent_size, latent_size),
+            nn.Linear(latent_size, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
             nn.ReLU(),
-            nn.Linear(latent_size, self.esz),
+            nn.Linear(latent_size, self.esz, bias=False),
             nn.BatchNorm1d(self.esz, affine=False),
             nn.ReLU())
 
