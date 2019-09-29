@@ -120,7 +120,7 @@ class HotMSEOnlyLoss(nn.Module):
 class HotMAEOnlyLoss(nn.Module):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, _ = out
-        loss = F.l1_loss(yhat, y)
+        loss = F.smooth_l1_loss(yhat, y)
         return loss
 
 
@@ -152,8 +152,8 @@ class Burn2MSELoss(HotLoss):
 class Burn2MAELoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         x1, x2, z1, z2, _, _ = out
-        mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
-        mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
+        mae_loss1 = F.smooth_l1_loss(x1, y[:,0:1,...])
+        mae_loss2 = F.smooth_l1_loss(x2, y[:,1:2,...])
         z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
         return mae_loss1 + mae_loss2 + self.beta * z_penalty
 
@@ -208,7 +208,7 @@ class OCMSELoss(OCLoss):
 
 class OCMAELoss(OCLoss):
     def _loss(self, yhat, y):
-        return F.l1_loss(yhat, y)
+        return F.smooth_l1_loss(yhat, y)
 
 
 class SVDDLoss(nn.Module):
