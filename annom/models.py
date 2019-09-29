@@ -34,6 +34,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from synthtorch import Unet
+from synthtorch.util import get_act
 from .errors import *
 from .layers import *
 from .loss import *
@@ -407,17 +408,17 @@ class LAutoNet(Unet):
         self.latent_fc = nn.Sequential(
             nn.Linear(self.esz, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
-            nn.ReLU(),
+            get_act(self.act, inplace=kwargs['inplace']),
             nn.Linear(latent_size, latent_size, bias=False))
 
         # Back to conv
         self.decode_fc = nn.Sequential(
             nn.Linear(latent_size, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
-            nn.ReLU(),
+            get_act(self.act, inplace=kwargs['inplace']),
             nn.Linear(latent_size, self.esz, bias=False),
             nn.BatchNorm1d(self.esz, affine=False),
-            nn.ReLU())
+            get_act(self.act, inplace=kwargs['inplace']))
 
         # replace first upsampconv to not reduce channels
         nc = int(2 ** (self.channel_base_power + n_layers - 1))
