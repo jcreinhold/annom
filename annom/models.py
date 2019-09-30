@@ -545,7 +545,7 @@ class OCNet2(LAutoNet):
         super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
         self.n_output = self.n_output + 1  # account for grad image
         id = np.asarray(img_dim)
-        sz_range = list(zip(np.around(0.1*id),np.around(0.2*id)))
+        sz_range = list(zip(np.around(0.25*id),np.around(0.5*id)))
         self.block = RandomBlock(sz_range, thresh=0, int_range=None, is_3d=self.dim == 3)
         self.criterion = SVDDMAELoss(latent_size, beta) if self.laplacian else SVDDMSELoss(latent_size, beta)
 
