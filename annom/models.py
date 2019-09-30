@@ -405,17 +405,18 @@ class LAutoNet(Unet):
         logger.debug(f'Size after Conv = {self.fsz}; Encoding size = {self.esz}')
 
         # Latent vector
-        self.latent_fc = nn.Sequential(
+        self.latent_fc1 = nn.Sequential(
             nn.Linear(self.esz, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
-            get_act(self.act, inplace=kwargs['inplace']),
-            nn.Linear(latent_size, latent_size, bias=False))
+            get_act(self.act, inplace=kwargs['inplace']))
+        self.latent_fc2 = nn.Linear(latent_size, latent_size, bias=False)
 
         # Back to conv
-        self.decode_fc = nn.Sequential(
+        self.decode_fc1 = nn.Sequential(
             nn.Linear(latent_size, latent_size, bias=False),
             nn.BatchNorm1d(latent_size, affine=False),
-            get_act(self.act, inplace=kwargs['inplace']),
+            get_act(self.act, inplace=kwargs['inplace']))
+        self.decode_fc2 = nn.Sequential(
             nn.Linear(latent_size, self.esz, bias=False),
             nn.BatchNorm1d(self.esz, affine=False),
             get_act(self.act, inplace=kwargs['inplace']))
@@ -423,6 +424,9 @@ class LAutoNet(Unet):
         # replace first upsampconv to not reduce channels
         nc = int(2 ** (self.channel_base_power + n_layers - 1))
         if not self.all_conv: self.upsampconvs[0] = self._upsampconv(nc, nc)
+
+    def _dropout(self, x):
+        return F.dropout(x, self.dropout_prob, training=self.enable_dropout, inplace=self.inplace)
 
     def _encode(self, x):
         sz = [x.shape]
@@ -438,8 +442,10 @@ class LAutoNet(Unet):
             if self.all_conv: x = self._add_noise(x)
         return x, sz
 
-    def _decode(self, z, sz):
-        x = self.decode_fc(z).view(z.size(0), *self.fsz)
+    def _decode(self, x, sz):
+        nb = x.size(0)
+        x = self._dropout(self.decode_fc1(x))
+        x = self.decode_fc2(x).view(nb, *self.fsz)
         x = self._up(self._add_noise(x), sz[-1][2:], 0)
         if self.all_conv: x = self._add_noise(x)
         for i, ul in enumerate(self.up_layers, 1):
@@ -452,10 +458,13 @@ class LAutoNet(Unet):
         if self.resblock: x = x + xr
         return self._finish(x)
 
+    def _latent(self, x):
+        return self.latent_fc2(self._dropout(self.latent_fc1(x.view(x.size(0), self.esz))))
+
     def forward(self, x, **kwargs):
         x = self._interp(x, self.img_dim)
         x, sz = self._encode(x)
-        z = self.latent_fc(x.view(x.size(0), self.esz))
+        z = self._latent(x)
         return self._decode(z, sz), z
 
     def predict(self, x, *args, **kwargs):
@@ -503,7 +512,7 @@ class OCNet1(LAutoNet):
     def forward(self, x:torch.Tensor, **kwargs):
         x = self._interp(x, self.img_dim)
         x, sz = self._encode(x)
-        z = self.latent_fc(x.view(x.size(0), self.esz))
+        z = self._latent(x)
         x = self._decode(z, sz)
         zf = torch.cat((torch.randn_like(z)*self.temperature,z), dim=0)  # create fake (oos) data at the origin
         c = self.classifier(zf)
@@ -513,7 +522,7 @@ class OCNet1(LAutoNet):
         x = self._interp(x, self.img_dim)
         x, sz = self._encode(x)
         h = x.register_hook(self.activations_hook)
-        z = self.latent_fc(x.view(x.size(0), self.esz))
+        z = self._latent(x)
         c = self.classifier(z)
         x = self._decode(z, sz)
         return x, c
@@ -559,13 +568,13 @@ class OCNet2(LAutoNet):
             xa = torch.stack([self.block(xi) for xi in x.cpu().detach()], dim=0).to(x.device)
             x = torch.cat((xa+0.5*torch.randn_like(xa), x), dim=0)
         x, sz = self._encode(x)
-        z = self.latent_fc(x.view(x.size(0), self.esz))
+        z = self._latent(x)
         return self._decode(z[nb:], sz), z
 
     def _fwd_predict(self, x):
         x = self._interp(x, self.img_dim)
         x, sz = self._encode(x)
-        z = self.latent_fc(x.view(x.size(0), self.esz))
+        z = self._latent(x)
         x = self._decode(z, sz)
         return x, z
 
