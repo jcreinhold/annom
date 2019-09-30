@@ -483,8 +483,9 @@ class OCNet1(LAutoNet):
     """
     def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None,
                  beta:float=1., temperature:float=0.01, **kwargs):
+        use_bias = kwargs['enable_bias']
         super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
-        self.classifier = nn.Linear(latent_size, 2)
+        self.classifier = nn.Linear(latent_size, 2, bias=use_bias)
         self.n_output = self.n_output + 1  # account for gradcam image
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
