@@ -541,20 +541,22 @@ class OCNet1(LAutoNet):
 
 class OCNet2(LAutoNet):
 
-    def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None, beta:float=1., **kwargs):
+    def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None,
+                 beta:float=1., temperature:float=0.1, **kwargs):
         super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
         self.n_output = self.n_output + 1  # account for grad image
         id = np.asarray(img_dim)
         sz_range = list(zip(np.around(0.25*id),np.around(0.5*id)))
         self.block = RandomBlock(sz_range, thresh=0, int_range=None, is_3d=self.dim == 3)
-        self.criterion = SVDDMAELoss(latent_size, beta) if self.laplacian else SVDDMSELoss(latent_size, beta)
+        self.criterion = SVDDMAELoss(latent_size, beta, temperature) if self.laplacian else \
+                         SVDDMSELoss(latent_size, beta, temperature)
 
     def forward(self, x:torch.Tensor, **kwargs):
         nb = x.size(0)
         x = self._interp(x, self.img_dim)
         with torch.no_grad():
             xa = torch.stack([self.block(xi) for xi in x.cpu().detach()], dim=0).to(x.device)
-            x = torch.cat((xa, x), dim=0)
+            x = torch.cat((xa+0.5*torch.randn_like(xa), x), dim=0)
         x, sz = self._encode(x)
         z = self.latent_fc(x.view(x.size(0), self.esz))
         return self._decode(z[nb:], sz), z

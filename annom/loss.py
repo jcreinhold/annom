@@ -212,9 +212,10 @@ class OCMAELoss(OCLoss):
 
 
 class SVDDLoss(nn.Module):
-    def __init__(self, sz, beta:float=1.):
+    def __init__(self, sz, beta:float=1., temperature:float=0.1):
         super().__init__()
         self.beta = beta
+        self.temperature = temperature
         self.register_buffer('c', torch.ones(1, sz, dtype=torch.float32))
         self.register_buffer('is_c_set', torch.zeros(1, dtype=torch.uint8))
 
@@ -239,12 +240,12 @@ class SVDDLoss(nn.Module):
             z = torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1)
             z[:nb] += 1e-6  # avoid division by zero
             z = z ** yi
-            z[:nb] *= 0.1  # weight the fake anomalies less
+            z[:nb] *= self.temperature  # weight the fake anomalies less
             svdd = torch.mean(z)
             logger.info(f'SVDD: {svdd.item():.2e}, RP: {rp.item():.2e}')
         return (svdd + self.beta * rp) if self.beta >= 0 else rp
 
-    def extra_repr(self): return f'beta={self.beta}'
+    def extra_repr(self): return f'beta={self.beta}, temperature={self.temperature}'
 
 
 class SVDDMSELoss(SVDDLoss):
