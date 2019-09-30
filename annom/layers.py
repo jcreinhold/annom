@@ -36,4 +36,3 @@ class SelfAttentionWithMap(nn.Module):
         o = self.gamma * torch.bmm(h, beta) + x
         attn_map = torch.mean(beta, dim=2).unsqueeze(1).view(*size).contiguous()  # which pixels are attended to most
         return o.view(*size).contiguous(), attn_map
-

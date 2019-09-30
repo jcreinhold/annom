@@ -21,6 +21,8 @@ __all__ = ['Burn2MSELoss',
            'OCMAELoss',
            'OCMSELoss',
            'OrdLoss',
+           'SVDDMAELoss',
+           'SVDDMSELoss',
            'Unburn2GaussianLoss',
            'Unburn2LaplacianLoss']
 
@@ -118,7 +120,7 @@ class HotMSEOnlyLoss(nn.Module):
 class HotMAEOnlyLoss(nn.Module):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         yhat, _ = out
-        loss = F.l1_loss(yhat, y)
+        loss = F.smooth_l1_loss(yhat, y)
         return loss
 
 
@@ -150,8 +152,8 @@ class Burn2MSELoss(HotLoss):
 class Burn2MAELoss(HotLoss):
     def forward(self, out:torch.Tensor, y:torch.Tensor):
         x1, x2, z1, z2, _, _ = out
-        mae_loss1 = F.l1_loss(x1, y[:,0:1,...])
-        mae_loss2 = F.l1_loss(x2, y[:,1:2,...])
+        mae_loss1 = F.smooth_l1_loss(x1, y[:,0:1,...])
+        mae_loss2 = F.smooth_l1_loss(x2, y[:,1:2,...])
         z_penalty = F.mse_loss(F.softmax(z1,dim=1), F.softmax(z2,dim=1), reduction='sum')
         return mae_loss1 + mae_loss2 + self.beta * z_penalty
 
@@ -185,7 +187,7 @@ class OCLoss(HotLoss):
         raise NotImplementedError
 
     def forward(self, out, y):
-        yhat, c, ctv = out
+        yhat, z, c = out
         ysz = yhat.shape[2:]
         y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
         rp = self._loss(yhat, y)
@@ -194,11 +196,9 @@ class OCLoss(HotLoss):
             ct = torch.ones(nb*2, dtype=torch.long, device=c.device)
             ct[:nb] = 0
             bce = F.cross_entropy(c, ct)
-            pd = torch.mean(F.pdist(ctv))
             accuracy = torch.mean((torch.argmax(c,dim=1)==ct).float())
-            logger.info(f'CE: {bce.item():.2e}, PD: {pd.item():.2e}, '
-                        f'RP: {rp.item():.2e}, Acc: {accuracy.item():.5f}')
-        return (bce + self.beta * (pd + rp)) if self.beta >= 0 else rp
+            logger.info(f'CE: {bce.item():.2e}, RP: {rp.item():.2e}, Acc: {accuracy.item():.5f}')
+        return (bce + self.beta * rp) if self.beta >= 0 else rp
 
 
 class OCMSELoss(OCLoss):
@@ -208,4 +208,51 @@ class OCMSELoss(OCLoss):
 
 class OCMAELoss(OCLoss):
     def _loss(self, yhat, y):
-        return F.l1_loss(yhat, y)
+        return F.smooth_l1_loss(yhat, y)
+
+
+class SVDDLoss(nn.Module):
+    def __init__(self, sz, beta:float=1., temperature:float=0.1):
+        super().__init__()
+        self.beta = beta
+        self.temperature = temperature
+        self.register_buffer('c', torch.ones(1, sz, dtype=torch.float32))
+        self.register_buffer('is_c_set', torch.zeros(1, dtype=torch.uint8))
+
+    def _loss(self, yhat, y):
+        raise NotImplementedError
+
+    def forward(self, out, y):
+        yhat, phi = out
+        ysz = yhat.shape[2:]
+        y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
+        rp = self._loss(yhat, y)
+        if self.beta >= 0:
+            nb = phi.shape[0] // 2
+            if torch.sum(self.is_c_set) == 0:
+                with torch.no_grad():
+                    self.c *= torch.mean(phi[nb:], dim=0, keepdim=True)
+                    self.is_c_set += 1
+                    logger.info('Set c in SVDD loss.')
+            c = torch.ones_like(phi) * self.c
+            yi = torch.ones(nb*2, dtype=phi.dtype, device=phi.device)
+            yi[:nb] = -1
+            z = torch.mean(F.mse_loss(phi, c, reduction='none'), dim=1)
+            z[:nb] += 1e-6  # avoid division by zero
+            z = z ** yi
+            z[:nb] *= self.temperature  # weight the fake anomalies less
+            svdd = torch.mean(z)
+            logger.info(f'SVDD: {svdd.item():.2e}, RP: {rp.item():.2e}')
+        return (svdd + self.beta * rp) if self.beta >= 0 else rp
+
+    def extra_repr(self): return f'beta={self.beta}, temperature={self.temperature}'
+
+
+class SVDDMSELoss(SVDDLoss):
+    def _loss(self, yhat, y):
+        return F.mse_loss(yhat, y)
+
+
+class SVDDMAELoss(SVDDLoss):
+    def _loss(self, yhat, y):
+        return F.smooth_l1_loss(yhat, y)
