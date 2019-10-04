@@ -491,15 +491,16 @@ class OCNet1(LAutoNet):
     one-class classifier network
     """
     def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None,
-                 beta:float=1., temperature:float=0.01, **kwargs):
+                 beta:float=1., temperature:float=0.01, monte_carlo:int=1, **kwargs):
         use_bias = kwargs['enable_bias']
         super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
         self.classifier = nn.Linear(latent_size, 2, bias=use_bias)
-        self.n_output = self.n_output + 1  # account for gradcam image
         self.laplacian = use_laplacian(loss)
         self.criterion = OCMAELoss(beta) if self.laplacian else OCMSELoss(beta)
         self.temperature = temperature
         self.gradients = None
+        self.n_samp = monte_carlo if self.dropout_prob > 0 else 1
+        self.n_output = self.n_output + (1 if self.n_samp == 1 else 3)  # account for var, grad, and grad var images
 
     def activations_hook(self, grad):
         self.gradients = grad
@@ -541,25 +542,36 @@ class OCNet1(LAutoNet):
         return x, c, heatmap
 
     def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        yhat, c, heatmap = self._gradcam(x)
+        out = [self._gradcam(x) for _ in range(self.n_samp)]
+        yhats = torch.stack([o[0] for o in out]).cpu().detach()
+        yhat = torch.mean(yhats, dim=0)
+        yvar = torch.var(yhats, dim=0, unbiased=True)
+        c = torch.mean(torch.stack([o[1] for o in out]).cpu().detach(), dim=0)
+        heatmaps = torch.stack([o[2] for o in out]).cpu().detach()
+        heatmap = torch.mean(heatmaps, dim=0)
+        hmvar = torch.var(heatmaps, dim=0, unbiased=True)
         yhat = self._interp(yhat, x.shape[2:])
+        yvar = self._interp(yvar, x.shape[2:])
         heatmap = self._interp(heatmap, x.shape[2:])
+        hmvar = self._interp(hmvar, x.shape[2:])
         pred = torch.argmax(c, dim=1)
         logger.info(f'Prediction: {pred.detach().cpu().numpy().squeeze()}')
-        return torch.cat((yhat, heatmap), dim=1)
+        out = (yhat, heatmap) if self.n_samp == 1 else (yhat, yvar, heatmap, hmvar)
+        return torch.cat(out, dim=1)
 
 
 class OCNet2(LAutoNet):
 
     def __init__(self, n_layers:int, img_dim:Tuple[int], latent_size:int=50, loss:str=None,
-                 beta:float=1., temperature:float=0.1, **kwargs):
+                 beta:float=1., temperature:float=0.1, monte_carlo:int=1, **kwargs):
         super().__init__(n_layers, img_dim, loss, latent_size, **kwargs)
-        self.n_output = self.n_output + 1  # account for grad image
         id = np.asarray(img_dim)
         sz_range = list(zip(np.around(0.25*id),np.around(0.5*id)))
         self.block = RandomBlock(sz_range, thresh=0, int_range=None, is_3d=self.dim == 3)
         self.criterion = SVDDMAELoss(latent_size, beta, temperature) if self.laplacian else \
                          SVDDMSELoss(latent_size, beta, temperature)
+        self.n_samp = monte_carlo if self.dropout_prob > 0 else 1
+        self.n_output = self.n_output + (1 if self.n_samp == 1 else 3)  # account for var, grad, and grad var images
 
     def forward(self, x:torch.Tensor, **kwargs):
         nb = x.size(0)
@@ -590,8 +602,17 @@ class OCNet2(LAutoNet):
         return out, torch.mean(torch.abs(grad), dim=1, keepdim=True)
 
     def predict(self, x:torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        (yhat, z), grad = self._grad_img(x)
+        out = [self._grad_img(x) for _ in range(self.n_samp)]
+        yhats = torch.stack([o[0][0] for o in out]).cpu().detach()
+        yhat = torch.mean(yhats, dim=0)
+        yvar = torch.var(yhats, dim=0, unbiased=True)
+        z = torch.mean(torch.stack([o[0][1] for o in out]).cpu().detach(), dim=0)
+        grads = torch.stack([o[1] for o in out]).cpu().detach()
+        grad = torch.mean(grads, dim=0)
+        gvar = torch.var(grads, dim=0, unbiased=True)
         yhat = self._interp(yhat, x.shape[2:])
+        yvar = self._interp(yvar, x.shape[2:])
         dist = F.mse_loss(z, torch.ones_like(z)*self.criterion.c)
         logger.info(f'Anomaly score: {dist.item():.3e}')
-        return torch.cat((yhat, grad), dim=1)
+        out = (yhat, grad) if self.n_samp == 1 else (yhat, yvar, grad, gvar)
+        return torch.cat(out, dim=1)
