@@ -182,14 +182,21 @@ class Unburn2LaplacianLoss(Unburn2Loss):
         return torch.mean(np.sqrt(2) * (torch.exp(-s) * F.l1_loss(yhat, y, reduction='none')) + s)
 
 
-class OCLoss(HotLoss):
+class OCBase(HotLoss):
     def _loss(self, yhat, y):
         raise NotImplementedError
 
+    def _interp(self, x, sz):
+        if x.shape[2:] != sz:
+            x = F.interpolate(x, sz, mode='bilinear' if len(sz) == 2 else 'trilinear', align_corners=True)
+        return x
+
+
+class OCLoss(OCBase):
+
     def forward(self, out, y):
         yhat, z, c = out
-        ysz = yhat.shape[2:]
-        y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
+        y = self._interp(y, yhat.shape[2:])
         rp = self._loss(yhat, y)
         if self.beta >= 0:
             nb = c.shape[0] // 2
@@ -211,27 +218,24 @@ class OCMAELoss(OCLoss):
         return F.smooth_l1_loss(yhat, y)
 
 
-class SVDDLoss(nn.Module):
+class SVDDLoss(OCBase):
     def __init__(self, sz, beta:float=1., temperature:float=0.1):
-        super().__init__()
-        self.beta = beta
+        super().__init__(beta)
         self.temperature = temperature
         self.register_buffer('c', torch.ones(1, sz, dtype=torch.float32))
         self.register_buffer('is_c_set', torch.zeros(1, dtype=torch.uint8))
 
-    def _loss(self, yhat, y):
-        raise NotImplementedError
-
-    def forward(self, out, y):
+    def forward(self, out, y, eps=0.1):
         yhat, phi = out
-        ysz = yhat.shape[2:]
-        y = F.interpolate(y, ysz, mode='bilinear' if len(ysz) == 2 else 'trilinear', align_corners=True)
+        y = self._interp(y, yhat.shape[2:])
         rp = self._loss(yhat, y)
         if self.beta >= 0:
             nb = phi.shape[0] // 2
             if torch.sum(self.is_c_set) == 0:
                 with torch.no_grad():
                     self.c *= torch.mean(phi[nb:], dim=0, keepdim=True)
+                    self.c[(torch.abs(self.c) < eps) & (self.c < 0)] = -eps
+                    self.c[(torch.abs(self.c) < eps) & (self.c > 0)] = eps
                     self.is_c_set += 1
                     logger.info('Set c in SVDD loss.')
             c = torch.ones_like(phi) * self.c
