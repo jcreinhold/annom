@@ -605,7 +605,7 @@ class OCNet2(LAutoNet):
         out = [self._grad_img(x) for _ in range(self.n_samp)]
         yhats = torch.stack([o[0][0] for o in out]).cpu().detach()
         yhat = torch.mean(yhats, dim=0)
-        yvar = torch.var(yhats, dim=0, unbiased=True)
+        yvar = torch.mean(torch.var(yhats, dim=0, unbiased=True), keepdim=True, dim=1)
         z = torch.mean(torch.stack([o[0][1] for o in out]), dim=0)
         grads = torch.stack([o[1] for o in out]).cpu().detach()
         grad = torch.mean(grads, dim=0)
