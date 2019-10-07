@@ -614,5 +614,6 @@ class OCNet2(LAutoNet):
         yvar = self._interp(yvar, x.shape[2:])
         dist = F.mse_loss(z, torch.ones_like(z)*self.criterion.c)
         logger.info(f'Anomaly score: {dist.item():.3e}')
+        with open('scores.txt', 'a') as f: f.write(f'{dist.item():.8f}\n')
         out = (yhat, grad) if self.n_samp == 1 else (yhat, yvar, grad, gvar)
         return torch.cat(out, dim=1)
