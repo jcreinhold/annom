@@ -123,7 +123,7 @@ class HotNet(Unet):
         super().freeze()
         for p in self.finish[0].parameters(): p.requires_grad = False
 
-    def get_metrics(self, x, y, eps=1e-6):
+    def get_metrics(self, x, y, eps=1e-6, **kwargs):
         """ get uncertainties and other metrics during training for analysis """
         state = self.training
         self.eval()
