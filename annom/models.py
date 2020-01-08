@@ -123,12 +123,12 @@ class HotNet(Unet):
         super().freeze()
         for p in self.finish[0].parameters(): p.requires_grad = False
 
-    def get_metrics(self, x, y, n_samp=50, eps=1e-6):
+    def get_metrics(self, x, y, eps=1e-6):
         """ get uncertainties and other metrics during training for analysis """
         state = self.training
         self.eval()
         with torch.no_grad():
-            yhat, s, ep, al = self.predict(x, n_samp)
+            yhat, s, ep, al = self.predict(x)
             loss = self.criterion((yhat, s), y)
             yhat, s = yhat.detach().cpu(), s.detach().cpu()
             ep, al = ep.detach().cpu(), al.detach().cpu()
