@@ -91,7 +91,7 @@ class HotNet(Unet):
             self.criterion = HotGaussianLoss(beta) if not self.laplacian else HotLaplacianLoss(beta)
         else:
             self.criterion = HotMSEOnlyLoss() if not self.laplacian else HotMAEOnlyLoss()
-        self.n_output += 2
+        self.n_output += 3
 
     def _finish(self, x:torch.Tensor) -> Tuple[torch.Tensor,torch.Tensor]:
         xh = self.finish[0](x)
@@ -112,12 +112,12 @@ class HotNet(Unet):
         aleatoric = torch.mean(torch.exp(s),dim=0) if not self.laplacian else torch.mean(2*torch.exp(s)**2,dim=0)
         return epistemic, aleatoric
 
-    def predict(self, x:torch.Tensor, **kwargs) -> torch.Tensor:
+    def predict(self, x, **kwargs):
         out = [self.forward(x) for _ in range(self.n_samp)]
-        yhat = torch.stack([o[0] for o in out]).cpu().detach()
-        s = torch.stack([o[1] for o in out]).cpu().detach()
+        yhat = torch.stack([o[0] for o in out])
+        s = torch.stack([o[1] for o in out])
         e, a = self._calc_uncertainty(yhat, s)
-        return torch.cat((torch.mean(yhat, dim=0), e, a), dim=1)
+        return (yhat.mean(dim=0), s.mean(dim=0), e, a)
 
     def freeze(self):
         super().freeze()
